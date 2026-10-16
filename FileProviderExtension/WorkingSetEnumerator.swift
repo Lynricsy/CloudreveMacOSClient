@@ -19,7 +19,7 @@ final class WorkingSetEnumerator: NSObject, NSFileProviderEnumerator {
         let runtime = runtime
         Task {
             do {
-                let (items, next) = try await runtime.engine.workingSetItems(afterRowID: afterRowID, limit: Self.pageSize)
+                let (items, next) = try await runtime.engine.workingSetItems(afterRowID: afterRowID, limit: WorkingSetEnumerator.pageSize)
                 box.value.didEnumerate(items.map(runtime.item))
                 box.value.finishEnumerating(upTo: next.map { NSFileProviderPage(rawValue: SyncAnchorCodec.encode($0)) })
             } catch {

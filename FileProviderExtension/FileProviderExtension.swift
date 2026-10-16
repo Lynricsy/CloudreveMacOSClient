@@ -72,7 +72,8 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         let type = itemTemplate.contentType ?? .data
         let mtime = itemTemplate.contentModificationDate.flatMap { $0 } ?? Date()
         let mayExist = options.contains(.mayAlreadyExist)
-        if type.conforms(to: .symbolicLink) || type.conforms(to: .aliasFile) {
+        // 符号链接、替身与软件包（.app/.rtfd 等目录包）不同步，保留在本地
+        if type.conforms(to: .symbolicLink) || type.conforms(to: .aliasFile) || type.conforms(to: .package) {
             completionHandler(nil, [], false, NSFileProviderError(.excludedFromSync))
             return Progress(totalUnitCount: 1)
         }
@@ -119,8 +120,9 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
     ) -> Progress {
         let reply = SendableBox(completionHandler)
         let rawID = identifier.rawValue
+        let recursive = options.contains(.recursive)
         return launch(onError: { reply.value($0) }, body: { runtime in
-            try await runtime.engine.delete(id: runtime.syncID(raw: rawID))
+            try await runtime.engine.delete(id: runtime.syncID(raw: rawID), recursive: recursive)
             reply.value(nil)
         })
     }

@@ -28,3 +28,6 @@ identifier_name:
 function_parameter_count:
   warning: 10
   error: 12
+# 错误码映射等一一对应的 switch 不计入圈复杂度
+cyclomatic_complexity:
+  ignores_case_statements: true

@@ -10,6 +10,7 @@ public enum SyncError: Error, Sendable, Equatable {
     case syncAnchorExpired
     case versionConflict
     case excludedFromSync
+    case directoryNotEmpty
     case cannotSynchronize(String)
 }
 
@@ -24,6 +25,7 @@ extension SyncError: LocalizedError {
         case .syncAnchorExpired: return "同步状态已过期"
         case .versionConflict: return "文件版本冲突"
         case .excludedFromSync: return "文件被忽略规则排除"
+        case .directoryNotEmpty: return "目录不为空"
         case .cannotSynchronize(let message): return message
         }
     }

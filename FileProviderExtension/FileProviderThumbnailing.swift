@@ -18,19 +18,22 @@ extension FileProviderExtension: NSFileProviderThumbnailing {
         let tracker = SendableBox(progress)
         return launch(progress: progress, onError: { done.value($0) }, body: { runtime in
             await withTaskGroup(of: Void.self) { group in
+                // 只在父任务里累加进度，避免子任务并发读改写 completedUnitCount 丢计数
                 for (index, rawID) in rawIDs.enumerated() {
-                    if index >= Self.thumbnailConcurrency { await group.next() }
+                    if index >= FileProviderExtension.thumbnailConcurrency, await group.next() != nil {
+                        tracker.value.completedUnitCount += 1
+                    }
                     group.addTask {
                         let identifier = NSFileProviderItemIdentifier(rawID)
                         do {
-                            let data = try await Self.thumbnail(runtime: runtime, id: runtime.syncID(raw: rawID))
+                            let data = try await FileProviderExtension.thumbnail(runtime: runtime, id: runtime.syncID(raw: rawID))
                             perItem.value(identifier, data, nil)
                         } catch {
                             perItem.value(identifier, nil, FileProviderBridge.nsError(error))
                         }
-                        tracker.value.completedUnitCount += 1
                     }
                 }
+                for await _ in group { tracker.value.completedUnitCount += 1 }
             }
             done.value(nil)
         })

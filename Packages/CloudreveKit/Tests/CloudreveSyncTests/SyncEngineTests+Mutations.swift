@@ -132,6 +132,24 @@ extension SyncEngineTests {
         #expect(env.server.node("/a") == nil)
     }
 
+    @Test func nonRecursiveDeleteRefusesFolderWithRemoteChildren() async throws {
+        let env = try await EngineHarness.make()
+        env.server.addFolder("/a", id: "A")
+        env.server.addFolder("/empty", id: "E")
+        try await env.enumerateAll(env.rootID)
+        // 远端新增、本地尚未见过的子项：非递归删除必须拒绝，不得连带删除
+        env.server.addFile("/a/new.txt", id: "N")
+        await #expect(throws: SyncError.directoryNotEmpty) {
+            try await env.engine.delete(id: "A", recursive: false)
+        }
+        #expect(env.server.node("/a") != nil)
+        #expect(try env.record("A") != nil)
+
+        try await env.engine.delete(id: "E", recursive: false)
+        #expect(env.server.node("/empty") == nil)
+        #expect(try env.record("E") == nil)
+    }
+
     // MARK: - 下载
 
     @Test func downloadWritesBytesAndRecordsTransfer() async throws {

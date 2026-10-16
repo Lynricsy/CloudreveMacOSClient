@@ -79,6 +79,7 @@ enum FileProviderBridge {
         case .syncAnchorExpired: return .syncAnchorExpired
         case .versionConflict: return .localVersionConflictingWithServer
         case .excludedFromSync: return .excludedFromSync
+        case .directoryNotEmpty: return .directoryNotEmpty
         case .cannotSynchronize: return .cannotSynchronize
         }
     }

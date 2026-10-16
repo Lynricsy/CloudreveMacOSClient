@@ -52,11 +52,17 @@ extension SyncEngine {
     }
 
     /// 删除远端条目；远端已不存在视为成功。
-    public func delete(id: String) async throws {
+    /// `recursive == false` 且远端目录仍有子项（可能是本地尚未见到的远端新增）时抛 `.directoryNotEmpty`，
+    /// 避免连带删除用户未见过的文件。
+    public func delete(id: String, recursive: Bool = true) async throws {
         try await run {
             guard id != self.rootID else { throw SyncError.cannotSynchronize("不能删除云盘根目录") }
             guard let record = try self.items.get(driveID: self.driveID, id: id) else { return }
             do {
+                if record.isFolder, !recursive {
+                    let children = try await self.client.listFiles(uri: record.uri, pageSize: 1)
+                    if !children.files.isEmpty { throw SyncError.directoryNotEmpty }
+                }
                 try await self.client.delete(uris: [record.uri])
             } catch let error as CloudreveAPIError where [404, 40044].contains(error.serverCode ?? 0) {
                 Log.shared.info("engine", "远端已删除：\(record.uri)")
