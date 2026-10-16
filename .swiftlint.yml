@@ -1,0 +1,25 @@
+included:
+  - Packages
+  - App
+  - FileProviderExtension
+  - Shared
+excluded:
+  - Packages/CloudreveKit/.build
+  - .build
+disabled_rules:
+  - todo
+opt_in_rules:
+  - explicit_init
+  - closure_spacing
+  - unneeded_parentheses_in_closure_argument
+line_length:
+  warning: 140
+  error: 180
+type_body_length:
+  warning: 400
+  error: 600
+file_length:
+  warning: 600
+  error: 900
+identifier_name:
+  min_length: 2

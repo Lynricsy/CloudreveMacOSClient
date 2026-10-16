@@ -1,0 +1,14 @@
+.agent-logs/
+.build/
+.swiftpm/
+*.xcodeproj/
+DerivedData/
+Config/Local.xcconfig
+.DS_Store
+*.xcuserstate
+
+# XcodeGen 生成物（由 project.yml 的 info/entitlements properties 生成）
+App/Info.plist
+App/Cloudreve.entitlements
+FileProviderExtension/Info.plist
+FileProviderExtension/CloudreveFileProvider.entitlements
