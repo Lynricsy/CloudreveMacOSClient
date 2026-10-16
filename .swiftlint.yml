@@ -5,9 +5,10 @@ included:
   - Shared
 excluded:
   - Packages/CloudreveKit/.build
-  - .build
 disabled_rules:
   - todo
+  # 有意使用 String(decoding:as:) 容错解码响应体
+  - optional_data_string_conversion
 opt_in_rules:
   - explicit_init
   - closure_spacing
@@ -23,3 +24,7 @@ file_length:
   error: 900
 identifier_name:
   min_length: 2
+# 计划中的同步引擎/上传接口参数较多（如 SyncEngine.modify 9 个参数）
+function_parameter_count:
+  warning: 10
+  error: 12
