@@ -1,0 +1,9 @@
+// 两个 target 共用的基础构建配置。开发团队写在 Local.xcconfig（不入库）。
+#include? "Local.xcconfig"
+
+MACOSX_DEPLOYMENT_TARGET = 26.0
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+SWIFT_VERSION = 6.0
+SWIFT_STRICT_CONCURRENCY = complete
+DEAD_CODE_STRIPPING = YES
