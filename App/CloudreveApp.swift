@@ -25,6 +25,8 @@ struct CloudreveApp: App {
         .defaultSize(width: 470, height: 630)
         .defaultLaunchBehavior(.suppressed)
         .restorationBehavior(.disabled)
+        // cloudreve:// 回跳由 AppDelegate 处理；禁止 SwiftUI 因外部 URL 再打开一个空白窗口
+        .handlesExternalEvents(matching: [])
 
         Settings {
             SettingsView()

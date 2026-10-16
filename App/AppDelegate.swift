@@ -12,9 +12,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     let windowRouter = WindowRouter()
     private var poller: ActivityPoller?
 
+    /// 通知中心委托必须在启动完成前设置，否则冷启动时点击通知的回调会丢失。
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        UNUserNotificationCenter.current().delegate = self
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         OSLogSink.install(minimum: driveManager.preferences.logLevel)
-        UNUserNotificationCenter.current().delegate = self
         LaunchAtLogin.initializeOnFirstLaunch(preferences: driveManager.preferences)
         let poller = ActivityPoller(
             driveStore: driveManager.driveStore, transferStore: driveManager.transferStore, preferences: driveManager.preferences

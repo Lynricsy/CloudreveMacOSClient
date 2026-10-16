@@ -50,8 +50,11 @@ final class OAuthFlow: NSObject, ASWebAuthenticationPresentationContextProviding
         complete(state: state, with: OAuthCallback.parse(url, expectedState: state))
     }
 
-    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        anchor ?? NSApplication.shared.keyWindow ?? NSWindow()
+    /// SDK 中该协议要求不带隔离；系统总在主线程请求锚点，因此用 `assumeIsolated` 声明这一前提（不在主线程时会立即崩溃而不是数据竞争）。
+    nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        MainActor.assumeIsolated {
+            anchor ?? NSApplication.shared.keyWindow ?? NSWindow()
+        }
     }
 
     private func begin(url: URL, state: String, continuation: CheckedContinuation<OAuthCallback, any Error>) {
