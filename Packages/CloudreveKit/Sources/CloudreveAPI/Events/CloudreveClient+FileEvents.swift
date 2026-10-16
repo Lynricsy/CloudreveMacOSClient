@@ -42,7 +42,7 @@ extension CloudreveClient {
     }
 
     /// 收齐流为字符串（错误响应体）。
-    static func collect(_ chunks: AsyncThrowingStream<Data, any Error>) async throws -> String {
+    public static func collect(_ chunks: AsyncThrowingStream<Data, any Error>) async throws -> String {
         var data = Data()
         for try await chunk in chunks { data.append(chunk) }
         return String(decoding: data, as: UTF8.self)
