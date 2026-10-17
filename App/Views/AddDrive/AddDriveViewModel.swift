@@ -106,7 +106,7 @@ final class AddDriveViewModel {
         do {
             let client = DriveRuntime.makeClient(driveID: driveID, site: site, clientID: clientID)
             let user = try await client.me()
-            let root = try await client.fileInfo(uri: rootURI)
+            let root = try await client.folderInfo(uri: rootURI)
             guard root.isFolder else { throw AddDriveError.notAFolder }
             let capacity = try await client.capacity()
             let setup = DriveSetup(

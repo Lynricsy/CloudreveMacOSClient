@@ -80,6 +80,15 @@ extension CloudreveClient {
         try await request("GET", "/file/info", query: [("id", id)])
     }
 
+    /// 目录自身信息。服务端拒绝对文件系统根（如 `cloudreve://my`）调用 `/file/info`（业务码 403），
+    /// 而列目录响应的 `parent` 对根与子目录都可用，因此以单条分页列目录取得。
+    public func folderInfo(uri: CloudreveURI) async throws -> FileResponse {
+        guard let parent = try await listFiles(uri: uri, pageSize: 1).parent else {
+            throw CloudreveAPIError.decoding("/file：缺少 parent")
+        }
+        return parent
+    }
+
     public func createItem(uri: CloudreveURI, isFolder: Bool) async throws -> FileResponse {
         let body = CreateBody(uri: uri.description, type: isFolder ? "folder" : "file", errOnConflict: true)
         return try await request("POST", "/file/create", body: .encoding(body))
