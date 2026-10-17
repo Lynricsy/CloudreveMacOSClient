@@ -4,7 +4,6 @@ import SwiftUI
 struct DriveCardView: View {
     let drive: DriveSummary
 
-    @Environment(DriveManager.self) private var driveManager
     @State private var isEditingIgnoreRules = false
     @State private var isConfirmingRemoval = false
 
@@ -39,16 +38,8 @@ struct DriveCardView: View {
             )
         }
         .padding(.vertical, 6)
-        .sheet(isPresented: $isEditingIgnoreRules) {
-            IgnorePatternsEditor(drive: drive)
-        }
-        .confirmationDialog("移除云盘「\(drive.name)」？", isPresented: $isConfirmingRemoval) {
-            Button("移除", role: .destructive) {
-                Task { await driveManager.removeDrive(id: drive.id) }
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("移除后本地未上传的更改将丢失。")
-        }
+        .modifier(DriveActionDialogs(
+            drive: drive, isEditingIgnoreRules: $isEditingIgnoreRules, isConfirmingRemoval: $isConfirmingRemoval
+        ))
     }
 }

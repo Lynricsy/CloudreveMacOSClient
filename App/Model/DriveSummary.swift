@@ -14,6 +14,8 @@ struct DriveSummary: Identifiable, Equatable, Sendable {
     let capacityTotal: Int64
     let capacityUsed: Int64
     let capacityUpdatedAt: Date?
+    /// 最近一次与服务端全量核对（reconcile）的时间。
+    let lastReconcileAt: Date?
 
     init(record: DriveRecord) {
         id = record.id
@@ -27,6 +29,7 @@ struct DriveSummary: Identifiable, Equatable, Sendable {
         capacityTotal = record.capacityTotal
         capacityUsed = record.capacityUsed
         capacityUpdatedAt = record.capacityUpdatedAt
+        lastReconcileAt = record.lastReconcileAt
     }
 
     /// 容量信息是否早于 `maxAge` 秒（或从未获取）。

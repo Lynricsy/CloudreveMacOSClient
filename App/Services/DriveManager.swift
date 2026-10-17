@@ -21,6 +21,8 @@ final class DriveManager {
     private(set) var runningCount = 0
     /// 尚未在系统设置中启用「文件提供程序」的云盘（弹窗打开时刷新）。
     private(set) var disabledDriveIDs: Set<String> = []
+    /// 设置页单云盘概览（按云盘 id）。
+    var overviews: [String: DriveOverviewState] = [:]
     /// 弹窗按云盘过滤；nil 表示全部。
     private(set) var selectedDriveID: String?
     /// 最近一次界面操作失败的提示（由视图以 alert 展示）。
@@ -197,6 +199,7 @@ final class DriveManager {
         } catch {
             report(error)
         }
+        overviews[id] = nil
         reload()
         syncDoorbell()
     }
