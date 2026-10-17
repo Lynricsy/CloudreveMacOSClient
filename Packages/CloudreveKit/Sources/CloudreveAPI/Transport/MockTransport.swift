@@ -37,8 +37,13 @@ public actor MockTransport: HTTPTransport {
         requests.filter { $0.method == method && Self.matches(prefix: pathPrefix, request: $0) }
     }
 
+    /// 设置了 `UploadBodyProgress.handler` 时，对非空 `.data` 请求体先后回报一半与全部字节（模拟发送过程）。
     public func send(_ request: HTTPRequest) async throws -> HTTPResponse {
         requests.append(request)
+        if let report = UploadBodyProgress.handler, case .data(let body) = request.body, !body.isEmpty {
+            report(Int64(body.count / 2))
+            report(Int64(body.count))
+        }
         guard let route = Self.bestMatch(routes, for: request) else {
             return HTTPResponse(status: 404, body: Data("no route".utf8))
         }

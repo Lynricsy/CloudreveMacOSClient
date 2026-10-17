@@ -19,7 +19,8 @@ import Testing
         #expect(chunks.map(\.url.path) == ["/api/v4/file/upload/s1/0", "/api/v4/file/upload/s1/1", "/api/v4/file/upload/s1/2"])
         #expect(chunks.map { $0.bodyData?.count } == [4, 4, 2])
         #expect(chunks.allSatisfy { $0.headers["Content-Type"] == "application/octet-stream" })
-        #expect(progress.values == [0, 4, 8, 10])
+        // 分片内按已发送字节推进（mock 每个请求先回报一半），而不是只在分片完成时跳变
+        #expect(progress.values == [0, 2, 4, 6, 8, 9, 10])
         #expect(try store.loadSession(uri: Fixture.uri.description) == nil)
     }
 
@@ -56,7 +57,7 @@ import Testing
         #expect(chunks.map(\.url.path) == ["/api/v4/file/upload/s1/1", "/api/v4/file/upload/s1/2"])
         #expect(chunks.map(\.bodyData) == [data.subdata(in: 4..<8), data.subdata(in: 8..<10)])
         #expect(await mock.requests("GET", pathPrefix: "/api/v4/file/info").count == 1)
-        #expect(progress.values == [4, 8, 10])
+        #expect(progress.values == [4, 6, 8, 9, 10])
         #expect(try store.loadSession(uri: Fixture.uri.description) == nil)
     }
 

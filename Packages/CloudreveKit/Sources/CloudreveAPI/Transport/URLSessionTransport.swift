@@ -21,6 +21,8 @@ public final class URLSessionTransport: HTTPTransport {
         let urlRequest = Self.makeURLRequest(request)
         do {
             switch request.body {
+            case .data(let body) where UploadBodyProgress.handler != nil && !body.isEmpty:
+                return try await sendReportingProgress(urlRequest, body: body, handler: UploadBodyProgress.handler)
             case .none, .data:
                 let (data, response) = try await session.data(for: urlRequest)
                 return HTTPResponse(status: Self.status(of: response), headers: Self.headers(of: response), body: data)
@@ -50,6 +52,21 @@ public final class URLSessionTransport: HTTPTransport {
             task.cancel()
         }
         return (head, stream)
+    }
+
+    /// 上传请求体并经 `didSendBodyData` 回报已发送字节（Linux 的 FoundationNetworking 无该 API，退化为普通请求）。
+    private func sendReportingProgress(
+        _ urlRequest: URLRequest, body: Data, handler: (@Sendable (Int64) -> Void)?
+    ) async throws -> HTTPResponse {
+        #if canImport(FoundationNetworking)
+        let (data, response) = try await session.data(for: urlRequest)
+        #else
+        var bodyless = urlRequest
+        bodyless.httpBody = nil
+        let delegate = BodySendProgressDelegate(handler: handler)
+        let (data, response) = try await session.upload(for: bodyless, from: body, delegate: delegate)
+        #endif
+        return HTTPResponse(status: Self.status(of: response), headers: Self.headers(of: response), body: data)
     }
 
     private func upload(_ urlRequest: URLRequest, fromFile fileURL: URL) async throws -> HTTPResponse {
@@ -111,3 +128,21 @@ public final class URLSessionTransport: HTTPTransport {
         return CloudreveAPIError.transport(String(describing: error))
     }
 }
+
+#if !canImport(FoundationNetworking)
+/// 单个上传任务的请求体发送进度回调。
+private final class BodySendProgressDelegate: NSObject, URLSessionTaskDelegate, Sendable {
+    private let handler: (@Sendable (Int64) -> Void)?
+
+    init(handler: (@Sendable (Int64) -> Void)?) {
+        self.handler = handler
+    }
+
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64,
+        totalBytesSent: Int64, totalBytesExpectedToSend: Int64
+    ) {
+        handler?(totalBytesSent)
+    }
+}
+#endif

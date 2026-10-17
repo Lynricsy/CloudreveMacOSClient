@@ -34,7 +34,7 @@ public struct Uploader: Sendable {
     /// 下次调用可断点续传；其它错误删除本地会话记录后原样抛出（40076/40004/40051 等由同步层翻译）。
     public func upload(
         fileURL: URL, size: Int64, to uri: CloudreveURI, mimeType: String, lastModified: Date,
-        overwrite: OverwriteMode, progress: ProgressHandler
+        overwrite: OverwriteMode, progress: @escaping ProgressHandler
     ) async throws -> FileResponse {
         if size == 0 { return try await uploadEmpty(to: uri, overwrite: overwrite) }
         let stored = try await prepareSession(size: size, uri: uri, mimeType: mimeType, lastModified: lastModified, overwrite: overwrite)
@@ -95,34 +95,40 @@ public struct Uploader: Sendable {
         return stored
     }
 
-    /// 并发上传未完成的分片，返回全部分片（含此前已完成的）etag。
+    /// 并发上传未完成的分片，返回全部分片（含此前已完成的）etag。进度按分片内已发送字节回报。
     private func uploadPendingChunks(
-        _ stored: StoredUploadSession, fileURL: URL, strategy: any ChunkStrategy, progress: ProgressHandler
+        _ stored: StoredUploadSession, fileURL: URL, strategy: any ChunkStrategy, progress: @escaping ProgressHandler
     ) async throws -> [Int: String] {
         let chunks = UploadPlan.chunks(size: stored.size, chunkSize: stored.session.chunkSize)
         var etags = stored.chunksDone.compactMapValues { $0 }
         var pending = chunks.filter { stored.chunksDone[$0.index] == nil }[...]
-        var done = chunks.filter { stored.chunksDone[$0.index] != nil }.reduce(Int64(0)) { $0 + $1.length }
-        progress(done, stored.size)
+        let completed = chunks.filter { stored.chunksDone[$0.index] != nil }.reduce(Int64(0)) { $0 + $1.length }
+        let tracker = ChunkProgressTracker(completed: completed, total: stored.size, report: progress)
+        tracker.reportCurrent()
         guard !pending.isEmpty else { return etags }
         let handle = try FileHandle(forReadingFrom: fileURL)
         defer { try? handle.close() }
         let concurrency = max(1, stored.session.storagePolicy?.chunkConcurrency ?? 1)
         try await withThrowingTaskGroup(of: (UploadChunk, String?).self) { group in
+            func start(_ chunk: UploadChunk) throws {
+                let data = try Self.read(chunk, from: handle)
+                group.addTask {
+                    let report: @Sendable (Int64) -> Void = { tracker.sent($0, of: chunk) }
+                    let etag = try await UploadBodyProgress.$handler.withValue(report) {
+                        try await uploadChunk(chunk, data: data, stored: stored, strategy: strategy)
+                    }
+                    return (chunk, etag)
+                }
+            }
             var running = 0
             while running < concurrency, let chunk = pending.popFirst() {
-                let data = try Self.read(chunk, from: handle)
-                group.addTask { (chunk, try await uploadChunk(chunk, data: data, stored: stored, strategy: strategy)) }
+                try start(chunk)
                 running += 1
             }
             while let (chunk, etag) = try await group.next() {
                 if let etag { etags[chunk.index] = etag }
-                done += chunk.length
-                progress(done, stored.size)
-                if let next = pending.popFirst() {
-                    let data = try Self.read(next, from: handle)
-                    group.addTask { (next, try await uploadChunk(next, data: data, stored: stored, strategy: strategy)) }
-                }
+                tracker.completed(chunk)
+                if let next = pending.popFirst() { try start(next) }
             }
         }
         return etags
