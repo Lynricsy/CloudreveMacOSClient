@@ -2,7 +2,9 @@ import Foundation
 
 /// App 与 File Provider 扩展共享的 App Group 容器路径。
 enum AppGroupPaths {
-    static let groupID = "group.plus.ling.cloudreve"
+    /// `<TeamIdentifierPrefix>plus.ling.cloudreve`；由 Info.plist 的 `AppGroupIdentifier` 在构建期展开。
+    /// macOS 上 Team 前缀形式的 App Group 无需写入描述文件，个人团队也可用；`group.` 形式未被描述文件授权时系统会拒绝访问容器。
+    static let groupID = Bundle.main.infoDictionary?["AppGroupIdentifier"] as? String ?? ""
 
     /// App Group 容器根目录。缺少 entitlement 属于配置错误，直接终止。
     static var containerURL: URL {

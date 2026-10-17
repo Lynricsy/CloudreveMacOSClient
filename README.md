@@ -58,7 +58,7 @@ Scripts/bootstrap-mac.sh                                  # xcodegen generate + 
 open Cloudreve.xcodeproj
 ```
 
-Bundle ID：App `plus.ling.cloudreve`，扩展 `plus.ling.cloudreve.fileprovider`，App Group `group.plus.ling.cloudreve`，钥匙串访问组 `$(AppIdentifierPrefix)plus.ling.cloudreve.shared`，URL scheme `cloudreve`。
+Bundle ID：App `plus.ling.cloudreve`，扩展 `plus.ling.cloudreve.fileprovider`，App Group `$(TeamIdentifierPrefix)plus.ling.cloudreve`（macOS 上 Team 前缀形式无需描述文件授权，个人团队可用），钥匙串访问组 `$(AppIdentifierPrefix)plus.ling.cloudreve.shared`，URL scheme `cloudreve`。
 
 ## 首次运行
 

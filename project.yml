@@ -37,7 +37,7 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
         com.apple.security.application-groups:
-          - group.plus.ling.cloudreve
+          - $(TeamIdentifierPrefix)plus.ling.cloudreve
         keychain-access-groups:
           - $(AppIdentifierPrefix)plus.ling.cloudreve.shared
     info:
@@ -50,6 +50,7 @@ targets:
         LSUIElement: true
         LSApplicationCategoryType: public.app-category.productivity
         AppIdentifierPrefix: $(AppIdentifierPrefix)
+        AppGroupIdentifier: $(TeamIdentifierPrefix)plus.ling.cloudreve
         CFBundleURLTypes:
           - CFBundleURLName: plus.ling.cloudreve.oauth
             CFBundleURLSchemes:
@@ -82,7 +83,7 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
         com.apple.security.application-groups:
-          - group.plus.ling.cloudreve
+          - $(TeamIdentifierPrefix)plus.ling.cloudreve
         keychain-access-groups:
           - $(AppIdentifierPrefix)plus.ling.cloudreve.shared
     info:
@@ -93,6 +94,7 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDevelopmentRegion: zh-Hans
         AppIdentifierPrefix: $(AppIdentifierPrefix)
+        AppGroupIdentifier: $(TeamIdentifierPrefix)plus.ling.cloudreve
         CFBundleIcons:
           CFBundlePrimaryIcon:
             CFBundleSymbolName: cloud
@@ -100,7 +102,7 @@ targets:
           NSExtensionPointIdentifier: com.apple.fileprovider-nonui
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FileProviderExtension
           NSExtensionFileProviderSupportsEnumeration: true
-          NSExtensionFileProviderDocumentGroup: group.plus.ling.cloudreve
+          NSExtensionFileProviderDocumentGroup: $(TeamIdentifierPrefix)plus.ling.cloudreve
           NSExtensionFileProviderSupportsFailingUploadOnConflict: true
     settings:
       base:
