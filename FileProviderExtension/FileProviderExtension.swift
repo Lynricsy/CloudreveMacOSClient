@@ -13,10 +13,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
             let runtime = try ExtensionRuntime.make(domain: domain)
             self.runtime = runtime
             initError = nil
-            Task {
-                try? await runtime.engine.maintenance()
-                await runtime.listener.start()
-            }
+            Task { try? await runtime.engine.maintenance() }
         } catch {
             runtime = nil
             initError = error.localizedDescription
@@ -25,10 +22,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         super.init()
     }
 
-    func invalidate() {
-        guard let listener = runtime?.listener else { return }
-        Task { await listener.stop() }
-    }
+    func invalidate() {}
 
     func item(
         for identifier: NSFileProviderItemIdentifier, request: NSFileProviderRequest,

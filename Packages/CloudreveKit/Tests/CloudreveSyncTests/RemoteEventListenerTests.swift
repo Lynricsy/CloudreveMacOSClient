@@ -107,6 +107,16 @@ private actor SleepGate {
         #expect(await harness.changes.current == 2)
     }
 
+    /// 服务端复用离线订阅者时事件可能已在投递前被删除：resumed 也必须触发兜底。
+    @Test func resumedAlsoTriggersReconcile() async throws {
+        let harness = try Harness(budget: 0)
+        await harness.routeStream { _ in "event: resumed\ndata: {}\n\n" }
+        await harness.listener.start()
+        try await eventually { await harness.applier.reconcileCount == 1 }
+        await harness.listener.stop()
+        #expect(await harness.status == .active)
+    }
+
     @Test func fiveFailuresMarksPushLost() async throws {
         let harness = try Harness(budget: 5)
         await harness.routeStream { attempt in attempt <= 5 ? nil : Self.subscribed }

@@ -19,23 +19,23 @@ flowchart LR
   end
   subgraph Kit["Packages/CloudreveKit（SwiftPM，Linux 可编译/可测）"]
     API["CloudreveAPI<br/>HTTPTransport · CloudreveClient · OAuth/Token · Uploader(10 种策略) · SSE"]
-    Sync["CloudreveSync<br/>GRDB 数据库 · SyncEngine · ChangeLog(sync anchor) · RemoteEventListener · 冲突/忽略策略"]
+    Sync["CloudreveSync<br/>GRDB 数据库 · SyncEngine · ChangeLog(sync anchor) · 远端变更队列 · RemoteEventListener · 冲突/忽略策略"]
   end
   App --> Sync --> API
   Ext --> Sync
   App -. "NSFileProviderManager add/remove/signal/reconnect" .-> Ext
   App <-- "App Group 容器内同一 SQLite(WAL)" --> Ext
   App <-- "Keychain 访问组：每个云盘一条凭证" --> Ext
-  Ext -- "HTTPS /api/v4 + SSE /file/events" --> Server["Cloudreve v4 ≥ 4.12"]
-  App -- "ping / site config / oauth token / me / capacity" --> Server
+  Ext -- "HTTPS /api/v4" --> Server["Cloudreve v4 ≥ 4.12"]
+  App -- "ping / site config / oauth token / me / capacity + SSE /file/events" --> Server
 ```
 
 | 目录 | 内容 |
 |---|---|
 | `Packages/CloudreveKit/Sources/CloudreveAPI` | 纯协议层：传输抽象、信封解析、Token 刷新（单飞 + 跨进程感知）、URI、分片上传（local/relay/remote/S3 系/OSS/OneDrive/七牛/又拍云）、SSE 解析 |
-| `Packages/CloudreveKit/Sources/CloudreveSync` | 同步决策与持久化：GRDB 迁移与各存储、`SyncEngine`（分页枚举差集、变更日志、冲突副本、远端事件应用、全量兜底）、`RemoteEventListener`（SSE 订阅 + 退避重连 + 定期 reconcile） |
+| `Packages/CloudreveKit/Sources/CloudreveSync` | 同步决策与持久化：GRDB 迁移与各存储、`SyncEngine`（分页枚举差集、变更日志、冲突副本、远端变更队列应用、全量兜底）、`RemoteEventListener`（SSE 订阅 + 退避重连 + 定期 reconcile） |
 | `FileProviderExtension/` | 只做 `NSFileProvider*` 与引擎值类型之间的转换 |
-| `App/` | 菜单栏弹窗、添加云盘（OAuth）、设置、通知、域管理 |
+| `App/` | 菜单栏弹窗、添加云盘（OAuth）、设置、通知、域管理、远端变更门铃（`RemoteChangeDoorbell`） |
 | `Shared/` | App 与扩展共用的 App Group 路径、钥匙串凭证、日志与客户端装配 |
 | `project.yml` | XcodeGen 工程描述（Info.plist 与 entitlements 由其生成，不入库） |
 
@@ -78,7 +78,10 @@ log stream --info | grep -i fileprovider                        # 系统 File Pr
 
 ## 同步行为
 
-- 远端变更：订阅挂载根目录的 SSE（`/file/events`），服务端会把整棵子树的事件推送过来；连续失败 5 次后标记「推送中断」，改为每 5 分钟全量 reconcile，正常时每 60 分钟兜底一次。
+- 远端变更：常驻的 App 为每个云盘订阅挂载根目录的 SSE（`/file/events`，服务端会推送整棵子树），收到即写入共享数据库的 `remote_event` 队列并通知系统刷新 working set；扩展在系统的变更枚举请求内应用队列、成功后才删除，失败时保留并把错误交给系统重试。网页端改动一般在服务端去抖后约 5 秒出现在 Finder。
+  - 扩展不自己订阅：它空闲几秒就会被系统回收，而服务端在投递前就删除离线事件，扩展消费到一半被回收会永久丢事件。
+  - 订阅成功（含 `resumed`）时做一次全量 reconcile；连续失败 5 次后标记「推送中断」，改为每 5 分钟全量 reconcile，正常时每 60 分钟兜底一次。
+  - 因此远端变更需要 App 在运行（默认登录时启动）；App 退出期间的改动在下次启动订阅成功后由 reconcile 补齐。
 - 本地变更：由系统调用扩展的 create/modify/delete，上传支持断点续传（会话持久化在共享数据库）。
 - 冲突：覆盖上传时以 `previous` 乐观锁检测服务端版本；冲突时本地内容另存为 `__conflict__{yyyyMMddHHmmss}_{原文件名}`，原文件回到服务端版本并发送通知。
 - 忽略规则：仅匹配文件名，支持 `*` `?`；内置 `~$*`、`~*.tmp`、`.~lock.*`、`.DS_Store`，可在设置中为每个云盘追加。

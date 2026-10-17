@@ -15,12 +15,17 @@ public final class SyncEngine: Sendable {
     let items: ItemStore
     let changeLog: ChangeLog
     let transfers: TransferStore
+    let remoteEvents: RemoteEventQueue
     let listings = ListingTracker()
+    /// 远端变更队列的单消费者门闩：多个枚举请求可能并发 drain，同一批不得被两边同时应用。
+    let remoteDrain = SerialGate()
 
     /// 列目录每页数量。
     static let pageSize = 1000
     /// 变更枚举每批上限。
     static let changeBatchLimit = 1000
+    /// 远端变更队列每批上限。
+    static let remoteEventBatchLimit = 500
 
     public init(
         driveID: String, db: any DatabaseWriter, client: CloudreveClient, uploader: Uploader,
@@ -34,6 +39,7 @@ public final class SyncEngine: Sendable {
         items = ItemStore(db: db, now: now)
         changeLog = ChangeLog(db: db, now: now)
         transfers = TransferStore(db: db, now: now)
+        remoteEvents = RemoteEventQueue(db: db, now: now)
         guard let drive = try drives.get(id: driveID) else { throw SyncError.noSuchItem }
         rootID = drive.rootFileID
     }

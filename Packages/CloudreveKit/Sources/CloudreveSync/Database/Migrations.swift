@@ -7,6 +7,9 @@ public enum Migrations {
         migrator.registerMigration("v1") { db in
             try db.execute(sql: v1)
         }
+        migrator.registerMigration("v2") { db in
+            try db.execute(sql: v2)
+        }
         return migrator
     }
 
@@ -89,5 +92,18 @@ public enum Migrations {
             key TEXT PRIMARY KEY NOT NULL,
             value TEXT NOT NULL
         );
+        """
+
+    /// 远端变更队列：App 的推送订阅写入，扩展在系统请求内取出应用、成功后删除。
+    /// `kind = 'event'` 时 `event_json` 为 `FileEvent` JSON；`kind = 'reconcile'` 表示需要全量兜底。
+    private static let v2 = """
+        CREATE TABLE remote_event (
+            seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            drive_id TEXT NOT NULL REFERENCES drive(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            event_json TEXT,
+            created_at DOUBLE NOT NULL
+        );
+        CREATE INDEX remote_event_drive_seq ON remote_event(drive_id, seq);
         """
 }

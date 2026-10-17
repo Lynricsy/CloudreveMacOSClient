@@ -113,4 +113,50 @@ extension SyncEngineTests {
         #expect(try env.record("docs") == nil)
         #expect(try env.record(added) == nil)
     }
+
+    @Test func queuedEventsSurviveFailedApplyAndAreRemovedAfterSuccess() async throws {
+        let env = try await EngineHarness.make()
+        let queue = RemoteEventQueue(db: env.db)
+        let id = env.server.addFile("/queued.txt")
+        try queue.append(driveID: env.driveID, events: [FileEvent(type: .create, fileID: id, from: "/queued.txt")])
+
+        // 应用中途失败（扩展被回收或网络错误同理）：事件不得丢失
+        env.server.failNext("GET", "/api/v4/file/info", code: 500)
+        await #expect(throws: (any Error).self) { try await env.engine.applyQueuedRemoteChanges() }
+        #expect(try env.record(id) == nil)
+        #expect(try queue.next(driveID: env.driveID, limit: 10) != nil)
+
+        #expect(try await env.engine.applyQueuedRemoteChanges())
+        #expect(try env.record(id)?.parentID == env.rootID)
+        #expect(try queue.next(driveID: env.driveID, limit: 10) == nil)
+        #expect(try await env.engine.applyQueuedRemoteChanges() == false)
+    }
+
+    @Test func queuedReconcileRequestRelistsEnumeratedFolders() async throws {
+        let env = try await EngineHarness.make()
+        try await env.enumerateAll(env.rootID)
+        let added = env.server.addFile("/missed.txt")
+        // 事件已被服务端丢弃，只剩兜底请求
+        try RemoteEventQueue(db: env.db).requestReconcile(driveID: env.driveID)
+        #expect(try await env.engine.applyQueuedRemoteChanges())
+        #expect(try env.record(added) != nil)
+    }
+
+    @Test func concurrentQueueDrainsApplyEachBatchOnce() async throws {
+        let env = try await EngineHarness.make()
+        let queue = RemoteEventQueue(db: env.db)
+        let id = env.server.addFile("/race.txt")
+        try queue.append(driveID: env.driveID, events: [FileEvent(type: .create, fileID: id, from: "/race.txt")])
+        env.server.setLatency("GET /api/v4/file/info", .milliseconds(200))
+        await env.mock.resetRequests()
+
+        // 两个枚举请求同时 drain：同一批只能由一方应用，另一方看到空队列
+        async let first = env.engine.applyQueuedRemoteChanges()
+        async let second = env.engine.applyQueuedRemoteChanges()
+        let results = try await [first, second]
+        #expect(results.sorted { !$0 && $1 } == [false, true])
+        #expect(await env.mock.requests("GET", pathPrefix: "/api/v4/file/info").count == 1)
+        #expect(try env.logged().filter { $0.id == id } == [LoggedChange(id: id, kind: .update)])
+        #expect(try queue.next(driveID: env.driveID, limit: 10) == nil)
+    }
 }

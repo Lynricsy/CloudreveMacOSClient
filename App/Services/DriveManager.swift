@@ -27,9 +27,11 @@ final class DriveManager {
     @ObservationIgnored let preferences: GeneralPreferences
     @ObservationIgnored let driveStore: DriveStore
     @ObservationIgnored let transferStore: TransferStore
+    @ObservationIgnored private let remoteEvents: RemoteEventQueue
     @ObservationIgnored private var pollingTask: Task<Void, Never>?
     @ObservationIgnored private var samples: [String: TransferSample] = [:]
     @ObservationIgnored private var refreshingCapacity: Set<String> = []
+    @ObservationIgnored private let doorbell = RemoteChangeDoorbell()
 
     init() {
         // 共享库打不开时 App 无法工作（也无法与扩展协作），属于不可恢复的环境错误。
@@ -39,8 +41,10 @@ final class DriveManager {
         }
         driveStore = DriveStore(db: db)
         transferStore = TransferStore(db: db)
+        remoteEvents = RemoteEventQueue(db: db)
         preferences = GeneralPreferences(settings: AppSettings(db: db))
         reload()
+        syncDoorbell()
     }
 
     var isShowingActionError: Bool {
@@ -152,12 +156,16 @@ final class DriveManager {
             throw error
         }
         reload()
+        syncDoorbell()
     }
 
     /// 重新登录成功：恢复 active，解除系统节流并重连域。
     func completeReauthorization(driveID: String) async throws {
         try driveStore.updateStatus(id: driveID, .active)
         reload()
+        if let record = try driveStore.get(id: driveID) {
+            doorbell.restart(record, queue: remoteEvents, driveStore: driveStore)
+        }
         try await DomainController.errorResolved(driveID: driveID)
         try await DomainController.reconnect(driveID: driveID)
     }
@@ -172,6 +180,13 @@ final class DriveManager {
             report(error)
         }
         reload()
+        syncDoorbell()
+    }
+
+    /// 门铃订阅与库中云盘对齐（读库失败时保持现状）。
+    private func syncDoorbell() {
+        guard let records = try? driveStore.all() else { return }
+        doorbell.sync(with: records, queue: remoteEvents, driveStore: driveStore)
     }
 
     func updateIgnorePatterns(id: String, _ patterns: [String]) {

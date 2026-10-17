@@ -6,14 +6,7 @@ extension SyncEngine {
     public func applyRemoteEvents(_ events: [FileEvent]) async throws -> Bool {
         try await run {
             let before = try self.changeLog.latestSeq(driveID: self.driveID)
-            for event in events where event.fileID != self.rootID {
-                switch event.type {
-                case .create, .modify, .rename:
-                    try await self.applyUpsertEvent(event)
-                case .delete:
-                    try self.applyDeleteEvent(event)
-                }
-            }
+            try await self.applyEvents(events)
             return try self.changeLog.latestSeq(driveID: self.driveID) != before
         }
     }
@@ -22,10 +15,29 @@ extension SyncEngine {
     public func reconcile() async throws -> Bool {
         try await run {
             let before = try self.changeLog.latestSeq(driveID: self.driveID)
-            for folder in try self.items.enumeratedFolders(driveID: self.driveID) {
-                try await self.relistFolder(id: folder.id)
+            try await self.reconcileEnumeratedFolders()
+            return try self.changeLog.latestSeq(driveID: self.driveID) != before
+        }
+    }
+
+    /// 应用 App 落库的远端变更队列：逐批应用，成功后才删除该批（失败时保留，下次重试）。
+    /// 含全量兜底请求的批次只做 reconcile，它覆盖同批全部事件。并发调用经 `remoteDrain` 串行执行。
+    /// 返回是否产生了变更日志。
+    public func applyQueuedRemoteChanges() async throws -> Bool {
+        try await remoteDrain.run { try await self.drainRemoteEvents() }
+    }
+
+    private func drainRemoteEvents() async throws -> Bool {
+        try await run {
+            let before = try self.changeLog.latestSeq(driveID: self.driveID)
+            while let batch = try self.remoteEvents.next(driveID: self.driveID, limit: Self.remoteEventBatchLimit) {
+                if batch.needsReconcile {
+                    try await self.reconcileEnumeratedFolders()
+                } else {
+                    try await self.applyEvents(batch.events)
+                }
+                try self.remoteEvents.remove(driveID: self.driveID, throughSeq: batch.lastSeq)
             }
-            try self.drives.updateLastReconcile(id: self.driveID)
             return try self.changeLog.latestSeq(driveID: self.driveID) != before
         }
     }
@@ -39,6 +51,24 @@ extension SyncEngine {
     }
 
     // MARK: - 内部
+
+    private func applyEvents(_ events: [FileEvent]) async throws {
+        for event in events where event.fileID != rootID {
+            switch event.type {
+            case .create, .modify, .rename:
+                try await applyUpsertEvent(event)
+            case .delete:
+                try applyDeleteEvent(event)
+            }
+        }
+    }
+
+    private func reconcileEnumeratedFolders() async throws {
+        for folder in try items.enumeratedFolders(driveID: driveID) {
+            try await relistFolder(id: folder.id)
+        }
+        try drives.updateLastReconcile(id: driveID)
+    }
 
     private func relistFolder(id: String) async throws {
         // 父目录本轮已删除该目录时跳过

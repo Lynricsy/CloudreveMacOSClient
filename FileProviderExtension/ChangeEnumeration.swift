@@ -18,6 +18,9 @@ enum ChangeEnumeration {
         }
         Task {
             do {
+                // 在系统请求内应用 App 落库的远端变更：请求未完成前扩展不会被回收。
+                // 失败直接报错（队列保留），由系统按错误类型重试或提示（如需要重新登录）。
+                _ = try await runtime.engine.applyQueuedRemoteChanges()
                 let batch = try await runtime.engine.changes(since: since)
                 if !batch.updated.isEmpty {
                     box.value.didUpdate(batch.updated.map(runtime.item))

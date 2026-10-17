@@ -9,9 +9,10 @@ import Testing
         let db = try SyncDatabase.openInMemory()
         try Migrations.migrator.migrate(db)
         let applied = try db.read { try Migrations.migrator.appliedMigrations($0) }
-        #expect(applied == ["v1"])
+        #expect(applied == ["v1", "v2"])
         let tables = try db.read { db in
-            try ["drive", "item", "change_log", "transfer", "upload_session", "app_setting"].allSatisfy { try db.tableExists($0) }
+            try ["drive", "item", "change_log", "transfer", "upload_session", "app_setting", "remote_event"]
+                .allSatisfy { try db.tableExists($0) }
         }
         #expect(tables)
     }
@@ -69,15 +70,18 @@ import Testing
         _ = try transfers.start(driveID: "d2", kind: .upload, itemID: "f1", name: "a.txt", uri: "cloudreve://my/a.txt", total: 1)
         try ChangeLog(db: db).append(driveID: "d1", itemID: "f1", kind: .update)
         try GRDBUploadProgressStore(db: db, driveID: "d1").saveSession(UploadStoreFixtures.stored(uri: "cloudreve://my/a.txt"))
+        try RemoteEventQueue(db: db).requestReconcile(driveID: "d1")
+        try RemoteEventQueue(db: db).requestReconcile(driveID: "d2")
 
         try DriveStore(db: db).delete(id: "d1")
 
         let counts = try db.read { db in
-            try ["item", "transfer", "change_log", "upload_session"].map {
+            try ["item", "transfer", "change_log", "upload_session", "remote_event"].map {
                 try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM \($0) WHERE drive_id = 'd1'") ?? -1
             }
         }
-        #expect(counts == [0, 0, 0, 0])
+        #expect(counts == [0, 0, 0, 0, 0])
+        #expect(try RemoteEventQueue(db: db).next(driveID: "d2", limit: 10)?.needsReconcile == true)
         #expect(try items.get(driveID: "d2", id: "f1") != nil)
         #expect(try transfers.recent(driveID: "d2").count == 1)
         #expect(try DriveStore(db: db).all().map(\.id) == ["d2"])

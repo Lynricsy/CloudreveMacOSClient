@@ -112,11 +112,11 @@ public actor RemoteEventListener {
 
     private func handle(_ event: SSEEvent) async throws -> StreamOutcome? {
         switch event.name {
-        case "subscribed":
+        // resumed 只表示服务端复用了离线订阅者：离线事件在投递前即被删除、满队列会丢弃，
+        // 不能证明本地完整，因此与新订阅一样做一次全量兜底。
+        case "subscribed", "resumed":
             setStatus(.active, onlyIf: nil)
             await reconcileAndNotify()
-        case "resumed":
-            setStatus(.active, onlyIf: nil)
         case "reconnect-required":
             return .reconnectNow
         case "event":

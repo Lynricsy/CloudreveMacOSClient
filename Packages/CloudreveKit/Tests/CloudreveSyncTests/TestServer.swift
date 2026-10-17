@@ -9,6 +9,8 @@ final class TestServer: Sendable {
 
     let mock = MockTransport()
     private let state: Mutex<ServerState>
+    /// 「方法 路径」→ 响应前的延迟（模拟慢请求，用于并发测试）。
+    private let latencies = Mutex<[String: Duration]>([:])
 
     private init(rootID: String) {
         state = Mutex(ServerState(rootID: rootID))
@@ -40,7 +42,10 @@ final class TestServer: Sendable {
         ]
         for (endpoint, handler) in routes {
             let parts = endpoint.split(separator: " ", maxSplits: 1).map(String.init)
-            await mock.route(parts[0], parts[1]) { [self] request in respond(request, handler) }
+            await mock.route(parts[0], parts[1]) { [self] request in
+                if let delay = latencies.withLock({ $0[endpoint] }) { try await Task.sleep(for: delay) }
+                return respond(request, handler)
+            }
         }
     }
 
@@ -132,5 +137,10 @@ final class TestServer: Sendable {
 
     func setChunkSize(_ size: Int64) {
         state.withLock { $0.chunkSize = size }
+    }
+
+    /// 之后对该端点（如 `"GET /api/v4/file/info"`）的每个请求都先等待 `delay` 再应答。
+    func setLatency(_ endpoint: String, _ delay: Duration) {
+        latencies.withLock { $0[endpoint] = delay }
     }
 }
