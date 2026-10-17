@@ -48,12 +48,14 @@ import Testing
             DBFixtures.item("old", path: "/dir", folder: true),
             DBFixtures.item("child", path: "/dir/x.txt", parent: "old")
         ])
+        let before = try ChangeLog(db: db).latestSeq(driveID: driveID)
         #expect(try store.upsert([DBFixtures.item("new", path: "/dir", folder: true)]) == ["new"])
         #expect(try store.get(driveID: driveID, id: "old") == nil)
         #expect(try store.get(driveID: driveID, id: "child") == nil)
-        let log = try ChangeLog(db: db).changes(driveID: driveID, afterSeq: 0, limit: 10)
-        #expect(log.map(\.itemID) == ["old", "child"])
-        #expect(log.allSatisfy { $0.kind == .delete && $0.createdAt == clock.now })
+        let log = try ChangeLog(db: db).changes(driveID: driveID, afterSeq: before, limit: 10)
+        #expect(log.map(\.itemID) == ["old", "child", "new"])
+        #expect(log.map(\.kind) == [.delete, .delete, .update])
+        #expect(log.allSatisfy { $0.createdAt == clock.now })
     }
 
     @Test func descendantsUseExactPrefix() throws {

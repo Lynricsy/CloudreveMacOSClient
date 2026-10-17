@@ -101,12 +101,13 @@ extension SyncEngineTests {
     @Test func deleteIsIdempotentWhenRemoteMissing() async throws {
         let env = try await EngineHarness.make()
         try env.items.upsert([DBFixtures.item("gone", path: "/gone.txt"), DBFixtures.item("gone2", path: "/gone2.txt")])
+        let before = try env.latestSeq()
         try await env.engine.delete(id: "gone")
         #expect(try env.record("gone") == nil)
         env.server.failNext("DELETE", "/api/v4/file", code: 404)
         try await env.engine.delete(id: "gone2")
         #expect(try env.record("gone2") == nil)
-        #expect(try env.logged() == [LoggedChange(id: "gone", kind: .delete), LoggedChange(id: "gone2", kind: .delete)])
+        #expect(try env.logged(after: before) == [LoggedChange(id: "gone", kind: .delete), LoggedChange(id: "gone2", kind: .delete)])
 
         await env.mock.resetRequests()
         try await env.engine.delete(id: "gone")

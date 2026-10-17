@@ -127,16 +127,15 @@ public final class SyncEngine: Sendable {
         return record.uri
     }
 
-    /// 把服务端对象写入镜像并记变更日志，返回引擎条目。
+    /// 把服务端对象写入镜像（同一事务记变更日志），返回引擎条目。
     @discardableResult
     func store(_ file: FileResponse, parentID: String, uri: CloudreveURI) throws -> SyncItem {
         let record = ItemRecord(file: file, driveID: driveID, parentID: parentID, uri: uri)
-        let changed = try items.upsert([record])
-        try changeLog.appendMany(driveID: driveID, itemIDs: changed, kind: .update)
+        try items.upsert([record])
         return SyncItem(record: record)
     }
 
-    /// 删除本地镜像中的条目（目录连同全部后代），并记 `delete`。
+    /// 删除本地镜像中的条目（目录连同全部后代），同一事务记 `delete`。
     func removeLocally(_ records: [ItemRecord]) throws {
         var ids: [String] = []
         for record in records {
@@ -145,9 +144,7 @@ public final class SyncEngine: Sendable {
             }
             ids.append(record.id)
         }
-        guard !ids.isEmpty else { return }
         try items.delete(driveID: driveID, ids: ids)
-        try changeLog.appendMany(driveID: driveID, itemIDs: ids, kind: .delete)
     }
 
     private func listFolderPage(id: String, pageToken: String?) async throws -> EnumerationPage {
@@ -157,8 +154,7 @@ public final class SyncEngine: Sendable {
         let records = response.files.map {
             ItemRecord(file: $0, driveID: driveID, parentID: id, uri: uri.appending($0.name))
         }
-        let changed = try items.upsert(records)
-        try changeLog.appendMany(driveID: driveID, itemIDs: changed, kind: .update)
+        try items.upsert(records)
         await listings.record(folderID: id, ids: records.map(\.id), isFirstPage: isFirstPage)
         let next = response.pagination?.nextToken.flatMap { $0.isEmpty ? nil : $0 }
         if next == nil {

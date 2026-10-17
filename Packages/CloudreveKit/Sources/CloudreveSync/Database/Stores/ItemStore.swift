@@ -35,9 +35,10 @@ public struct ItemStore: Sendable {
         try db.read { db in try Self.fetchDescendants(db, driveID: driveID, uriPrefix: uriPrefix.description) }
     }
 
-    /// 插入或更新条目，返回新增或追踪字段（name/parent_id/size/entity_id/updated_at/is_folder）有变化的 id。
-    /// 已有 `enumerated_at` 保留不覆盖。同一 uri 被另一个 id 占用时（远端删除后同名重建），
-    /// 旧行及其后代被删除并在同一事务内记 `delete` 变更，保证 `(drive_id, uri)` 唯一。
+    /// 插入或更新条目，返回新增或追踪字段（name/parent_id/size/entity_id/updated_at/is_folder）有变化的 id，
+    /// 并在同一事务内为它们记 `update` 变更：镜像与日志分开提交时，进程在两者之间被回收会永久丢失通知
+    /// （重放时字段已无变化，不会再产生 update）。已有 `enumerated_at` 保留不覆盖。
+    /// 同一 uri 被另一个 id 占用时（远端删除后同名重建），旧行及其后代被删除并记 `delete` 变更，保证 `(drive_id, uri)` 唯一。
     @discardableResult
     public func upsert(_ records: [ItemRecord]) throws -> [String] {
         let date = now()
@@ -47,12 +48,14 @@ public struct ItemStore: Sendable {
                 try Self.removeStale(db, occupying: record, at: date)
                 guard let existing = try Self.fetch(db, driveID: record.driveID, id: record.id) else {
                     try record.insert(db)
+                    try ChangeLog.insert(db, driveID: record.driveID, itemIDs: [record.id], kind: .update, at: date)
                     changed.append(record.id)
                     continue
                 }
                 var merged = record
                 merged.enumeratedAt = record.enumeratedAt ?? existing.enumeratedAt
                 if merged.differsInTrackedFields(from: existing) {
+                    try ChangeLog.insert(db, driveID: record.driveID, itemIDs: [record.id], kind: .update, at: date)
                     changed.append(record.id)
                 }
                 if merged.differsInStoredColumns(from: existing) {
@@ -63,13 +66,15 @@ public struct ItemStore: Sendable {
         }
     }
 
-    /// 仅删除给定 id 的行（后代由调用方通过 `descendants` 一并传入）。
+    /// 仅删除给定 id 的行（后代由调用方通过 `descendants` 一并传入），同一事务内记 `delete` 变更。
     public func delete(driveID: String, ids: [String]) throws {
         guard !ids.isEmpty else { return }
+        let date = now()
         try db.write { db in
             for id in ids {
                 try ItemRecord.deleteOne(db, key: ["drive_id": driveID, "id": id])
             }
+            try ChangeLog.insert(db, driveID: driveID, itemIDs: ids, kind: .delete, at: date)
         }
     }
 
