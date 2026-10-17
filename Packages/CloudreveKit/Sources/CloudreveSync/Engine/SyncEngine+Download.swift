@@ -3,20 +3,25 @@ import Foundation
 
 extension SyncEngine {
     /// 下载条目内容到 `destination`（调用方给出的临时文件路径）。
+    ///
+    /// 返回的条目必须描述写入的内容。系统请求的版本与本地镜像不一致时（远端已更新而系统仍持旧版本，或反之），
+    /// 先按 id 从服务端刷新镜像，再下载服务端当前版本；条目已被删除或移出挂载根时抛出 `noSuchItem`。
     public func download(id: String, version: String?, to destination: URL, progress: @escaping ProgressHandler) async throws -> SyncItem {
         try await run {
-            let record = try self.localRecord(id: id)
+            var record = try self.localRecord(id: id)
             guard !record.isFolder else { throw SyncError.cannotSynchronize("目录没有内容") }
-            let requested = version.flatMap { $0.isEmpty ? nil : $0 }
-            let entity = requested ?? (record.entityID.isEmpty ? nil : record.entityID)
+            if let requested = version, !requested.isEmpty, requested != record.entityID {
+                try await self.refreshItem(id: id, fallbackURI: record.uri)
+                record = try self.localRecord(id: id)
+            }
+            let entity = record.entityID.isEmpty ? nil : record.entityID
             let transfer = TransferProgress(
                 store: self.transfers, driveID: self.driveID, kind: .download, itemID: record.id, name: record.name,
                 uri: record.uri.description, total: record.size, now: self.now
             )
             do {
                 let written = try await self.fetchContent(record, entity: entity, to: destination, transfer: transfer, progress: progress)
-                // 只有请求的是当前版本时才知道期望长度
-                if entity == nil || entity == record.entityID, written != record.size {
+                if written != record.size {
                     try? FileManager.default.removeItem(at: destination)
                     throw SyncError.cannotSynchronize("下载长度不符")
                 }

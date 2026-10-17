@@ -170,14 +170,22 @@ extension SyncEngineTests {
         #expect(transfer.doneBytes == 11)
     }
 
-    @Test func downloadSpecificVersionSkipsLengthCheck() async throws {
+    /// 镜像已更新而系统仍请求旧版本：返回的内容与条目必须一致（以服务端当前版本为准）。
+    @Test func downloadStaleVersionReturnsLatestWithMatchingItem() async throws {
         let env = try await EngineHarness.make()
         env.server.addFile("/f.bin", content: Data("v1".utf8), id: "f")
         try await env.enumerateAll(env.rootID)
+        let stale = try #require(try env.record("f")).entityID
         let newer = env.server.replaceContent("/f.bin", with: Data("version two".utf8))
+        try await env.enumerateAll(env.rootID)
+
         let destination = EngineHarness.tempURL()
-        _ = try await env.engine.download(id: "f", version: newer, to: destination, progress: ignoreProgress)
+        let item = try await env.engine.download(id: "f", version: stale, to: destination, progress: ignoreProgress)
+
         #expect(try Data(contentsOf: destination) == Data("version two".utf8))
+        #expect(item.entityID == newer)
+        #expect(item.size == Int64("version two".utf8.count))
+        #expect(try env.record("f")?.entityID == newer)
     }
 
     @Test func downloadLengthMismatchFailsAndRemovesFile() async throws {
@@ -201,5 +209,16 @@ extension SyncEngineTests {
         await #expect(throws: SyncError.noSuchItem) {
             try await env.engine.download(id: "f", version: nil, to: EngineHarness.tempURL(), progress: ignoreProgress)
         }
+    }
+
+    @Test func downloadMismatchedVersionOfDeletedFileDropsMirror() async throws {
+        let env = try await EngineHarness.make()
+        env.server.addFile("/f.bin", id: "f")
+        try await env.enumerateAll(env.rootID)
+        env.server.remove("/f.bin")
+        await #expect(throws: SyncError.noSuchItem) {
+            try await env.engine.download(id: "f", version: "gone-entity", to: EngineHarness.tempURL(), progress: ignoreProgress)
+        }
+        #expect(try env.record("f") == nil)
     }
 }
