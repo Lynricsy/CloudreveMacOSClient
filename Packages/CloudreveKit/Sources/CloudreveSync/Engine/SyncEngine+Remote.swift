@@ -84,23 +84,17 @@ extension SyncEngine {
     }
 
     private func applyUpsertEvent(_ event: FileEvent) async throws {
-        let root = try drive().remoteRootURI
-        try await refreshItem(id: event.fileID, fallbackURI: CloudreveURI.join(root: root, relative: event.to ?? event.from))
-    }
-
-    /// 按 id 从服务端重取条目并更新镜像：服务端已删除、移出挂载根或移入未枚举目录时删除本地条目。
-    /// `fallbackURI` 仅在响应缺少 `path` 时使用。
-    func refreshItem(id: String, fallbackURI: CloudreveURI) async throws {
-        let existing = try items.get(driveID: driveID, id: id)
+        let existing = try items.get(driveID: driveID, id: event.fileID)
         let info: FileResponse
         do {
-            info = try await client.fileInfo(id: id)
+            info = try await client.fileInfo(id: event.fileID)
         } catch let error as CloudreveAPIError where [404, 40044].contains(error.serverCode ?? 0) {
             try removeLocally(existing.map { [$0] } ?? [])
             return
         }
         let root = try drive().remoteRootURI
-        let uri = info.path.flatMap(CloudreveURI.init(string:)) ?? fallbackURI
+        let uri = info.path.flatMap(CloudreveURI.init(string:))
+            ?? CloudreveURI.join(root: root, relative: event.to ?? event.from)
         // 移出挂载根，或移入尚未枚举的目录：删除本地旧位置，待该目录被枚举时再出现
         guard uri != root, uri.isDescendant(ofOrEqualTo: root), let parentURI = uri.parent,
               let parentID = try parentID(forURI: parentURI) else {

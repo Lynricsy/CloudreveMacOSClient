@@ -170,21 +170,21 @@ extension SyncEngineTests {
         #expect(transfer.doneBytes == 11)
     }
 
-    /// 镜像已更新而系统仍请求旧版本：返回的内容与条目必须一致（以服务端当前版本为准）。
-    @Test func downloadStaleVersionReturnsLatestWithMatchingItem() async throws {
+    /// 请求指定版本：返回该版本内容，条目的内容版本与大小描述该版本（File Provider 要求与请求一致），镜像不变。
+    @Test func downloadRequestedOldVersionReturnsThatVersion() async throws {
         let env = try await EngineHarness.make()
         env.server.addFile("/f.bin", content: Data("v1".utf8), id: "f")
         try await env.enumerateAll(env.rootID)
-        let stale = try #require(try env.record("f")).entityID
+        let old = try #require(try env.record("f")).entityID
         let newer = env.server.replaceContent("/f.bin", with: Data("version two".utf8))
         try await env.enumerateAll(env.rootID)
 
         let destination = EngineHarness.tempURL()
-        let item = try await env.engine.download(id: "f", version: stale, to: destination, progress: ignoreProgress)
+        let item = try await env.engine.download(id: "f", version: old, to: destination, progress: ignoreProgress)
 
-        #expect(try Data(contentsOf: destination) == Data("version two".utf8))
-        #expect(item.entityID == newer)
-        #expect(item.size == Int64("version two".utf8.count))
+        #expect(try Data(contentsOf: destination) == Data("v1".utf8))
+        #expect(item.entityID == old)
+        #expect(item.size == 2)
         #expect(try env.record("f")?.entityID == newer)
     }
 
@@ -211,14 +211,13 @@ extension SyncEngineTests {
         }
     }
 
-    @Test func downloadMismatchedVersionOfDeletedFileDropsMirror() async throws {
+    @Test func downloadUnavailableVersionFailsWithoutClaimingItemDeleted() async throws {
         let env = try await EngineHarness.make()
         env.server.addFile("/f.bin", id: "f")
         try await env.enumerateAll(env.rootID)
-        env.server.remove("/f.bin")
-        await #expect(throws: SyncError.noSuchItem) {
+        await #expect(throws: SyncError.cannotSynchronize("请求的版本已不存在")) {
             try await env.engine.download(id: "f", version: "gone-entity", to: EngineHarness.tempURL(), progress: ignoreProgress)
         }
-        #expect(try env.record("f") == nil)
+        #expect(try env.record("f") != nil)
     }
 }
