@@ -77,12 +77,10 @@ extension SyncEngine {
         try store(info, parentID: parentID, uri: uri)
     }
 
-    /// 优先按 id 定位（同路径可能已被新条目占用），找不到再按路径。
+    /// 只按 id 定位：路径可能已被新条目占用，按路径兜底会误删新条目；
+    /// 本地残留的旧行由 `reconcile()` 重列父目录时清理。
     private func applyDeleteEvent(_ event: FileEvent) throws {
-        let root = try drive().remoteRootURI
-        let record = try items.get(driveID: driveID, id: event.fileID)
-            ?? items.getByURI(driveID: driveID, uri: CloudreveURI.join(root: root, relative: event.from))
-        guard let record, record.id != rootID else { return }
+        guard event.fileID != rootID, let record = try items.get(driveID: driveID, id: event.fileID) else { return }
         try removeLocally([record])
     }
 }

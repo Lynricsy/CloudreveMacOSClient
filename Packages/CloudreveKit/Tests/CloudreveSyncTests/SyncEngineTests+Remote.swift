@@ -51,22 +51,23 @@ extension SyncEngineTests {
         #expect(try env.record("m") == nil)
     }
 
-    @Test func remoteDeleteByIDAndByPath() async throws {
+    @Test func remoteDeleteMatchesByIDNotPath() async throws {
         let env = try await EngineHarness.make()
         env.server.addFile("/d.txt", id: "d")
         try await env.enumerateAll(env.rootID)
-        try env.items.upsert([DBFixtures.item("p", path: "/p.txt")])
+        // 旧 id 已不在镜像中，原路径现属新 id：迟到的旧 delete 事件不得删除新条目
+        try env.items.upsert([DBFixtures.item("new", path: "/p.txt")])
         let before = try env.latestSeq()
         env.server.remove("/d.txt")
 
         let changed = try await env.engine.applyRemoteEvents([
             FileEvent(type: .delete, fileID: "d", from: "/stale-path.txt"),
-            FileEvent(type: .delete, fileID: "unknown-id", from: "/p.txt")
+            FileEvent(type: .delete, fileID: "old", from: "/p.txt")
         ])
         #expect(changed)
         #expect(try env.record("d") == nil)
-        #expect(try env.record("p") == nil)
-        #expect(try env.logged(after: before) == [LoggedChange(id: "d", kind: .delete), LoggedChange(id: "p", kind: .delete)])
+        #expect(try env.record("new") != nil)
+        #expect(try env.logged(after: before) == [LoggedChange(id: "d", kind: .delete)])
     }
 
     /// Verification 7：远端重命名目录 → 后代 uri 改前缀，日志只记目录本身。
