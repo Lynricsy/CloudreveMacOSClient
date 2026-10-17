@@ -3,8 +3,11 @@ import FileProvider
 
 /// 基于变更日志（sync anchor = change_log.seq）的变更枚举，供所有枚举器共用。
 enum ChangeEnumeration {
+    /// SDK 把初始页常量暴露为 `NSData`，需按原始字节比较。
     static func isInitial(_ page: NSFileProviderPage) -> Bool {
-        page == NSFileProviderPage.initialPageSortedByName || page == NSFileProviderPage.initialPageSortedByDate
+        let raw = page.rawValue
+        return raw == NSFileProviderPage.initialPageSortedByName as Data
+            || raw == NSFileProviderPage.initialPageSortedByDate as Data
     }
 
     static func enumerateChanges(runtime: ExtensionRuntime, observer: NSFileProviderChangeObserver, from anchor: NSFileProviderSyncAnchor) {
