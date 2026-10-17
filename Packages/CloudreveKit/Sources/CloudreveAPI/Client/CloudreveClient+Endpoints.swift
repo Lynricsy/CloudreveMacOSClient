@@ -164,6 +164,17 @@ extension CloudreveClient {
     }
 }
 
+// MARK: - 分享
+
+extension CloudreveClient {
+    /// `GET /share`：当前用户创建的分享。服务端要求 `page_size` 在 10…100 之间。
+    public func listShares(pageSize: Int = 100, nextPageToken: String? = nil) async throws -> ShareListResponse {
+        var query: [(String, String)] = [("page_size", String(pageSize))]
+        if let nextPageToken, !nextPageToken.isEmpty { query.append(("next_page_token", nextPageToken)) }
+        return try await request("GET", "/share", query: query)
+    }
+}
+
 // MARK: - 流式与透传
 
 extension CloudreveClient {
