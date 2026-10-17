@@ -65,6 +65,7 @@ Bundle ID：App `plus.ling.cloudreve`，扩展 `plus.ling.cloudreve.fileprovider
 1. 启动后菜单栏出现云朵图标（无 Dock 图标），点击弹出窗口。
 2. 「添加云盘」→ 输入站点地址 → 校验服务端版本 ≥ 4.12 → 浏览器中登录并授权、在网页弹出的挂载设置里选择远端目录 → 回跳 `cloudreve://mount?...`。
 3. 客户端换取 token、写入共享数据库并注册 File Provider 域；Finder 侧栏「位置」出现云盘，`~/Library/CloudStorage/` 下出现对应目录。
+4. 新注册的域默认未启用：在「系统设置 → 通用 → 登录项与扩展」的「文件提供程序」中打开 Cloudreve（添加完成页与弹窗会提示并提供「打开系统设置」按钮），启用前 Finder 访问云盘会失败。
 
 ## 调试
 

@@ -14,6 +14,11 @@ struct PopupView: View {
             if driveManager.drives.isEmpty {
                 PopupEmptyState()
             } else {
+                if !driveManager.disabledDriveIDs.isDisjoint(with: driveManager.drives.map(\.id)) {
+                    FileProviderDisabledBanner()
+                        .padding(.horizontal, 12)
+                        .padding(.top, 10)
+                }
                 DriveChipsRow()
                 Divider()
                 TransferListView()

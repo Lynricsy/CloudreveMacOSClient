@@ -31,6 +31,12 @@ enum DomainController {
         try await manager(driveID: driveID).signalErrorResolved(NSFileProviderError(.notAuthenticated))
     }
 
+    /// 用户尚未在「系统设置 → 通用 → 登录项与扩展 → 文件提供程序」中启用的云盘。
+    /// 新注册的域默认未启用，此时扩展不会被拉起，Finder 中访问云盘报错。
+    static func disabledDriveIDs() async throws -> Set<String> {
+        Set(try await NSFileProviderManager.domains().filter { !$0.userEnabled }.map(\.identifier.rawValue))
+    }
+
     /// 条目在 Finder 中的路径；`item` 为 nil 时返回云盘根目录。
     static func userVisibleURL(driveID: String, item: String?) async throws -> URL {
         let identifier = item.map { NSFileProviderItemIdentifier(rawValue: $0) } ?? .rootContainer

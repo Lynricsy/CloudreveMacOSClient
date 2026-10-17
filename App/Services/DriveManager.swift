@@ -19,6 +19,8 @@ final class DriveManager {
     private(set) var runningTransfers: [TransferRow] = []
     private(set) var recentTransfers: [TransferRow] = []
     private(set) var runningCount = 0
+    /// 尚未在系统设置中启用「文件提供程序」的云盘（弹窗打开时刷新）。
+    private(set) var disabledDriveIDs: Set<String> = []
     /// 弹窗按云盘过滤；nil 表示全部。
     private(set) var selectedDriveID: String?
     /// 最近一次界面操作失败的提示（由视图以 alert 展示）。
@@ -87,6 +89,7 @@ final class DriveManager {
     /// 弹窗出现时开始每秒刷新，并按需刷新过期的容量。
     func startPopupPolling() {
         refreshStaleCapacities()
+        Task { await refreshEnablement() }
         guard pollingTask == nil else { return }
         pollingTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -100,6 +103,21 @@ final class DriveManager {
     func stopPopupPolling() {
         pollingTask?.cancel()
         pollingTask = nil
+    }
+
+    /// 重新读取各云盘域的启用状态；读取失败时保持现状。
+    func refreshEnablement() async {
+        do {
+            disabledDriveIDs = try await DomainController.disabledDriveIDs()
+        } catch {
+            Log.shared.info("DriveManager", "读取域启用状态失败：\(error.localizedDescription)")
+        }
+    }
+
+    /// 打开「系统设置 → 通用 → 登录项与扩展」，用户在其中启用「文件提供程序」。
+    func openFileProviderSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     /// 两次采样间隔不足 0.5 秒时沿用上次速度，避免非轮询触发的 reload 造成跳变。

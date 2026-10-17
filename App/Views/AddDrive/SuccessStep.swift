@@ -23,9 +23,13 @@ struct SuccessStep: View {
             } else {
                 Text("云盘已添加")
                     .font(.title2.bold())
-                Text("云盘已出现在 Finder 侧栏的「位置」中，文件将按需下载。")
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+                if driveManager.disabledDriveIDs.contains(driveID) {
+                    FileProviderDisabledBanner()
+                } else {
+                    Text("云盘已出现在 Finder 侧栏的「位置」中，文件将按需下载。")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
             }
             Spacer()
             HStack {
@@ -38,5 +42,12 @@ struct SuccessStep: View {
             }
         }
         .actionErrorAlert(driveManager)
+        // 新域默认未启用：在本页停留期间持续复查，用户在系统设置中打开后提示随即消失
+        .task {
+            while !Task.isCancelled {
+                await driveManager.refreshEnablement()
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
     }
 }
