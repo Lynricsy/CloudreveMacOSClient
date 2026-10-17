@@ -145,12 +145,12 @@ final class DriveManager {
         }
     }
 
-    /// 拉取容量并写库；凭证失效时把云盘标为需要重新登录。
-    func refreshCapacity(driveID: String) async {
+    /// 拉取容量并写库；凭证失效时把云盘标为需要重新登录。传入 `client` 可与同批请求共用 token 刷新。
+    func refreshCapacity(driveID: String, client: CloudreveClient? = nil) async {
         guard !refreshingCapacity.contains(driveID), let record = try? driveStore.get(id: driveID) else { return }
         refreshingCapacity.insert(driveID)
         defer { refreshingCapacity.remove(driveID) }
-        let client = DriveRuntime.makeClient(drive: record)
+        let client = client ?? DriveRuntime.makeClient(drive: record)
         do {
             let capacity = try await client.capacity()
             try driveStore.updateCapacity(id: driveID, total: capacity.total, used: capacity.used)

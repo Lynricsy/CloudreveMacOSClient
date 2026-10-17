@@ -13,9 +13,11 @@ extension DriveManager {
         state.isLoading = true
         overviews[id] = state
 
-        async let capacity: Void = refreshCapacity(driveID: id)
+        // 容量与概览共用一个 client：同一 TokenManager 内 token 刷新单飞。
+        let client = DriveRuntime.makeClient(drive: record)
+        async let capacity: Void = refreshCapacity(driveID: id, client: client)
         do {
-            let overview = try await DriveRuntime.makeClient(drive: record).accountOverview(rootURI: record.remoteRootURI)
+            let overview = try await client.accountOverview(rootURI: record.remoteRootURI)
             state.overview = overview
             state.loadedAt = Date()
             state.errorMessage = nil
