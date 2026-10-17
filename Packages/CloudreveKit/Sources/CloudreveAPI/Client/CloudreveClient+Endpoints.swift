@@ -13,6 +13,9 @@ extension CloudreveClient {
     }
 
     /// 用授权码换 token（OAuth2 + PKCE）。
+    ///
+    /// 服务端 ExchangeToken 返回标准 OAuth JSON（失败为 4xx + `{"error": ...}`），不带 `{code,data,msg}` 信封，
+    /// 因此不走 `request`，直接解码响应体。
     public static func exchangeOAuthCode(
         site: URL, transport: any HTTPTransport, code: String, codeVerifier: String,
         redirectURI: String = OAuthConstants.callbackPath
@@ -26,7 +29,19 @@ extension CloudreveClient {
             ("redirect_uri", redirectURI),
             ("code_verifier", codeVerifier)
         ]
-        return try await client.request("POST", "/session/oauth/token", body: .form(form), authenticated: false)
+        let path = "/session/oauth/token"
+        let request = client.makeRequest(
+            "POST", client.apiURL(path), body: .form(form), headers: ["Accept": "application/json"]
+        )
+        let response = try await client.sendMapped(request)
+        guard (200..<300).contains(response.status) else {
+            throw CloudreveAPIError.http(status: response.status, body: String(decoding: response.body, as: UTF8.self))
+        }
+        do {
+            return try CloudreveDate.makeDecoder().decode(OAuthTokenResponse.self, from: response.body)
+        } catch {
+            throw CloudreveAPIError.decoding("\(path)：\(error)")
+        }
     }
 
     /// 刷新 token。

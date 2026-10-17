@@ -63,8 +63,10 @@ import Testing
     @Test func formEncodingUsesPercent20() async throws {
         #expect(FormEncoding.encode([("scope", "a b+c/d")]) == "scope=a%20b%2Bc%2Fd")
         let mock = MockTransport()
+        // 服务端 ExchangeToken 返回标准 OAuth JSON，不带 {code,data,msg} 信封。
         await mock.route("POST", "/api/v4/session/oauth/token") { _ in
-            .envelope(dataJSON: #"{"access_token":"a","token_type":"Bearer","expires_in":3600,"refresh_token":"r"}"#)
+            let json = #"{"access_token":"a","token_type":"Bearer","expires_in":3600,"refresh_token":"r"}"#
+            return HTTPResponse(status: 200, headers: ["Content-Type": "application/json"], body: Data(json.utf8))
         }
         let response = try await CloudreveClient.exchangeOAuthCode(
             site: Fixtures.site, transport: mock, code: "c 1", codeVerifier: "v"
