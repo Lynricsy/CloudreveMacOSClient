@@ -28,9 +28,10 @@ final class FileProviderItem: NSObject, NSFileProviderItem {
         return UTType(filenameExtension: ext) ?? .data
     }
 
+    /// 可否淘汰本地副本由 `contentPolicy`（继承域的按需下载策略）决定，不再使用已弃用的 `.allowsEvicting`。
     var capabilities: NSFileProviderItemCapabilities {
         var capabilities: NSFileProviderItemCapabilities = [
-            .allowsReading, .allowsWriting, .allowsRenaming, .allowsReparenting, .allowsDeleting, .allowsEvicting
+            .allowsReading, .allowsWriting, .allowsRenaming, .allowsReparenting, .allowsDeleting
         ]
         if item.isFolder {
             capabilities.formUnion([.allowsAddingSubItems, .allowsContentEnumerating])
