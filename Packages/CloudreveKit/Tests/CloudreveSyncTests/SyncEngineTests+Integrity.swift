@@ -71,19 +71,24 @@ extension SyncEngineTests {
 
     /// 实体信息查询很慢：与取下载地址并发，但拿到期望摘要后才开始请求正文。
     /// 传输层的分块流不限缓冲，提前开始会让正文在查询期间全部堆在内存里。
+    ///
+    /// 正确实现在闸门打开前不可能请求正文，因此本用例不会误报；反过来，回退修复后能否被发现取决于下载任务
+    /// 在观察窗口内是否被调度到（无法证明「不会发生」），窗口只降低漏报概率。
     @Test func downloadStartsBodyOnlyAfterEntityInfoArrives() async throws {
         let env = try await EngineHarness.make()
         env.server.addFile("/f.bin", content: Data("hello world".utf8), id: "f")
         try await env.enumerateAll(env.rootID)
         env.server.publishHash(entity: try #require(try env.record("f")).entityID)
         let gate = env.server.hold("GET /api/v4/file/info")
+        defer { gate.open() }
 
         let destination = EngineHarness.tempURL()
         let task = Task { try await env.engine.download(id: "f", version: nil, to: destination, progress: ignoreProgress) }
+        defer { task.cancel() }
+        // 两个检查点：实体信息请求已到达并被挂起（与取地址并发），下载地址已取得
+        try await env.server.waitUntilRequested("GET", "/api/v4/file/info")
         try await env.server.waitUntilCompleted("POST /api/v4/file/url")
-        // 下载地址已取得、实体信息仍挂起：给错误实现留出发起正文请求的机会
         try await Task.sleep(for: .milliseconds(100))
-        #expect(await env.mock.requests("GET", pathPrefix: "/api/v4/file/info").count == 1)
         #expect(await env.mock.requests("GET", pathPrefix: ServerState.downloadPrefix).isEmpty)
 
         gate.open()

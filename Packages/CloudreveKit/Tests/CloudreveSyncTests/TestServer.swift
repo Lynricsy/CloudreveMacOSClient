@@ -90,6 +90,15 @@ final class TestServer: Sendable {
         }
     }
 
+    /// 等待该请求到达传输层（不论是否已应答）；超时视为测试失败。
+    func waitUntilRequested(_ method: String, _ pathPrefix: String, timeout: Duration = .seconds(5)) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while await mock.requests(method, pathPrefix: pathPrefix).isEmpty {
+            guard ContinuousClock.now < deadline else { throw ServerFailure(code: -1) }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
     // MARK: - 测试操作（模拟网页端改动）
 
     @discardableResult
