@@ -1,0 +1,79 @@
+name: Release
+
+# 推送 vX.Y.Z tag 时发布：先跑完整 CI，再构建 arm64 Release 包并创建 GitHub Release。
+# 没有 Developer ID 签名，附件只是未签名的构建产物，供检查编译结果；使用者需自行用 Xcode 签名构建。
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: 构建并发布
+    needs: ci
+    runs-on: xcode-27
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 校验 tag 与版本号一致
+        run: |
+          version=$(sed -n 's/^MARKETING_VERSION = //p' Config/Base.xcconfig)
+          if [[ "$TAG" != "v$version" ]]; then
+            echo "::error::tag $TAG 与 Config/Base.xcconfig 的 MARKETING_VERSION $version 不一致"
+            exit 1
+          fi
+          echo "VERSION=$version" >>"$GITHUB_ENV"
+
+      - name: 提取版本说明
+        run: |
+          # 取 CHANGELOG.md 中 "## [版本]" 到下一个 "## [" 之间的内容
+          awk -v v="$VERSION" '
+            index($0, "## [" v "]") == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md >notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::error::CHANGELOG.md 中没有 [$VERSION] 的说明"
+            exit 1
+          fi
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 构建 Release（arm64，不签名）
+        run: |
+          xcodegen generate
+          xcodebuild -project Cloudreve.xcodeproj -scheme Cloudreve -configuration Release \
+            -derivedDataPath DerivedData ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build
+
+      - name: 打包
+        run: |
+          app=DerivedData/Build/Products/Release/Cloudreve.app
+          lipo -archs "$app/Contents/MacOS/Cloudreve" | grep -qx arm64
+          asset="Cloudreve-$VERSION-arm64-unsigned.zip"
+          ditto -c -k --keepParent "$app" "$asset"
+          shasum -a 256 "$asset" >"$asset.sha256"
+          echo "ASSET=$asset" >>"$GITHUB_ENV"
+
+      - name: 创建 Release
+        run: |
+          # 先建草稿、传完附件再公开，避免公开后附件缺失
+          gh release create "$TAG" --draft --verify-tag --title "Cloudreve $TAG" --notes-file notes.md \
+            "$ASSET" "$ASSET.sha256"
+          gh release edit "$TAG" --draft=false
