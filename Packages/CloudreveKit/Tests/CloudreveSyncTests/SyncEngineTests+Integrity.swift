@@ -117,6 +117,24 @@ extension SyncEngineTests {
         }
     }
 
+    /// 历史版本的期望长度只能取自实体信息：查询暂时失败时不得降级为「什么都不校验」，截短的正文必须报错而不是交付。
+    @Test func downloadOldVersionFailsWhenEntityInfoUnavailable() async throws {
+        let env = try await EngineHarness.make()
+        env.server.addFile("/f.bin", content: Data("v1".utf8), id: "f")
+        try await env.enumerateAll(env.rootID)
+        let old = try #require(try env.record("f")).entityID
+        env.server.replaceContent("/f.bin", with: Data("version two".utf8))
+        try await env.enumerateAll(env.rootID)
+
+        env.server.overrideNext("GET", "/api/v4/file/info", with: HTTPResponse(status: 503, body: Data("busy".utf8)))
+        env.server.overrideNext("GET", ServerState.downloadPrefix, with: HTTPResponse(status: 200, body: Data("v".utf8)))
+        let destination = EngineHarness.tempURL()
+        await #expect(throws: SyncError.serverUnreachable) {
+            try await env.engine.download(id: "f", version: old, to: destination, progress: ignoreProgress)
+        }
+        #expect(!FileManager.default.fileExists(atPath: destination.path))
+    }
+
     /// 重新导入命中大小相同的同名文件且服务端公布了 SHA-256：只比对摘要，不下载服务端内容。
     @Test func createFileAdoptionComparesPublishedSHA256() async throws {
         let env = try await EngineHarness.make()

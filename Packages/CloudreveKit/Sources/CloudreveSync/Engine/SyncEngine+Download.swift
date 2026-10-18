@@ -130,8 +130,11 @@ extension SyncEngine {
         }
         if record.size == 0 && entity == nil { return 0 }
         // 实体信息与取下载地址并发，不增加串行往返；但必须在开始取正文前拿到：
-        // 传输层的分块流不限缓冲，正文先到而摘要迟迟未到时，整个文件会堆在扩展内存里
-        async let published = publishedEntity(fileID: record.id, entity: entity)
+        // 传输层的分块流不限缓冲，正文先到而摘要迟迟未到时，整个文件会堆在扩展内存里。
+        // 没有 expectedSize（历史版本）时期望长度只能取自实体信息，查询失败不能降级，否则长度也不校验
+        async let published = publishedEntity(
+            fileID: record.id, entity: entity, toleratingTransientFailure: expectedSize != nil
+        )
         let url = try await client.downloadURL(uri: record.uri, entity: entity)
         let known = try await published
         let (head, chunks) = try await client.fetch(url: url)
@@ -159,17 +162,18 @@ extension SyncEngine {
         return written
     }
 
-    /// 服务端记录的实体大小与 SHA-256；未指定实体、文件已不含该实体或查询暂时失败时返回 nil。
+    /// 服务端记录的实体大小与 SHA-256；未指定实体、文件已不含该实体或（允许时）查询暂时失败时返回 nil。
     ///
-    /// 摘要只是额外一层校验，取不到不应让本可完成的操作失败：摘要格式无效按未公布处理；查询遇到暂时性故障
-    /// （传输错误、408/429/5xx）时退回只校验长度（下载）或逐字节比较（认领）。条目不存在、凭证失效与取消照常抛出，
-    /// 由调用方按原有语义处理。
-    func publishedEntity(fileID: String, entity: String?) async throws -> FileEntity? {
+    /// 摘要格式无效按未公布处理。`toleratingTransientFailure` 为 true 时，查询遇到暂时性故障（传输错误、408/429/5xx）
+    /// 返回 nil，只适用于调用方有退路的场合：下载已知期望长度时只校验长度，认领逐字节比较。
+    /// 条目不存在、凭证失效与取消始终照常抛出，由调用方按原有语义处理。
+    func publishedEntity(fileID: String, entity: String?, toleratingTransientFailure: Bool) async throws -> FileEntity? {
         guard let entity else { return nil }
         let info: FileResponse
         do {
             info = try await client.fileInfo(id: fileID, extended: true)
-        } catch where SyncErrorMapper.map(error) as? SyncError == .serverUnreachable && !Task.isCancelled {
+        } catch where toleratingTransientFailure && !Task.isCancelled
+            && SyncErrorMapper.map(error) as? SyncError == .serverUnreachable {
             Log.shared.info("engine", "查询实体信息暂时失败，本次不校验摘要：\(error)")
             return nil
         }

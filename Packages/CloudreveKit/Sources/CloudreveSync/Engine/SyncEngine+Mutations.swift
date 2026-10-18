@@ -224,7 +224,7 @@ extension SyncEngine {
         guard size == item.size else { return false }
         guard size > 0 else { return true }
         let entity = Self.nonEmpty(item.entityID)
-        if let digest = try await publishedEntity(fileID: item.id, entity: entity)?.sha256 {
+        if let digest = try await publishedEntity(fileID: item.id, entity: entity, toleratingTransientFailure: true)?.sha256 {
             return try ContentDigest.sha256(of: local) == digest
         }
         let url = try await client.downloadURL(uri: item.uri, entity: entity)
