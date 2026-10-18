@@ -116,11 +116,13 @@ extension SyncEngineTests {
         #expect(transfers.contains { $0.name == copyName && $0.state == .done && !$0.isConflict })
     }
 
-    /// 系统未提供基准版本：以镜像 entity 作为乐观锁，服务端已被别处修改时按冲突处理，不得无锁覆盖。
-    @Test func modifyWithoutBaseUsesMirrorEntityAsLock() async throws {
+    /// 系统未提供基准版本时不以镜像 entity 为锁：镜像已被远端事件刷新到用户未见过的版本，覆盖也必须按冲突处理。
+    @Test func modifyWithoutBaseRejectsEvenWhenMirrorWasRefreshed() async throws {
         let (env, _) = try await Self.modifyFixture()
         let remote = Data("edited elsewhere".utf8)
         env.server.replaceContent("/name.txt", with: remote)
+        try await env.enumerateAll(env.rootID)
+        #expect(try env.record("a")?.entityID == env.server.node("/name.txt")?.entityID)
         await #expect(throws: SyncError.versionConflict) {
             try await Self.modify(env, fields: [.contents], content: Data("mine".utf8), base: nil, failOnConflict: true)
         }
@@ -128,16 +130,14 @@ extension SyncEngineTests {
         #expect(try env.transfers.recent(driveID: env.driveID).first?.isConflict == true)
     }
 
-    /// 镜像也没有 entity：先查服务端，服务端已有内容则按冲突处理。
-    @Test func modifyWithoutAnyVersionRefusesToOverwriteServerContent() async throws {
-        let (env, _) = try await Self.modifyFixture()
-        var record = try #require(try env.record("a"))
-        record.entityID = ""
-        try env.items.upsert([record])
-        await #expect(throws: SyncError.versionConflict) {
-            try await Self.modify(env, fields: [.contents], content: Data("mine".utf8), base: nil, failOnConflict: true)
+    /// 内容变更却没有本地文件：在任何字段生效前拒绝，不改名、不把服务端内容覆盖为空。
+    @Test func modifyContentsWithoutFileTouchesNothing() async throws {
+        let (env, entity) = try await Self.modifyFixture()
+        await #expect(throws: SyncError.self) {
+            try await Self.modify(env, fields: [.filename, .contents], newName: "b.txt", content: nil, base: entity)
         }
         #expect(env.server.node("/name.txt")?.content == Self.original)
+        #expect(await env.mock.requests.isEmpty)
     }
 
     /// 镜像路径已过期（远端改名后原路径被另一个文件占用）：内容覆盖必须写到该 id 的当前位置，而不是覆盖占位者。

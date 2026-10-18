@@ -5,17 +5,20 @@ extension SyncEngine {
     /// 依次应用 文件名 → 父目录 → 内容。某步失败时，若之前已有步骤成功则返回剩余字段让系统稍后重试，
     /// 否则抛错。日期、扩展属性、标签等字段不同步，视为已应用。
     ///
-    /// 内容以乐观锁覆盖：`baseContentVersion` 为 nil 表示系统未提供可靠版本，此时以镜像记录的 entity 为锁；
-    /// 镜像也没有 entity 时先查服务端，服务端已有内容则按冲突处理，不得无锁覆盖。
+    /// 内容以乐观锁覆盖，锁只取系统给的 `baseContentVersion`：镜像可能已被远端事件刷新到用户未见过的版本，不能代替。
+    /// 为 nil（系统未确认过同步版本）时先查服务端，服务端已有内容则按冲突处理，不得无锁覆盖。
     public func modify(
         id: String, fields: ItemFields, newName: String?, newParentID: String?, contents: URL?, mtime: Date?,
         baseContentVersion: String?, failOnConflict: Bool, progress: @escaping ProgressHandler
     ) async throws -> ModifyResult {
         try await run {
             var current = try self.localItem(id: id)
-            // 重命名/移动会用服务端返回值刷新 entity，锁必须取修改前镜像中的版本
-            let lock = Self.nonEmpty(baseContentVersion) ?? Self.nonEmpty(current.entityID)
+            let lock = Self.nonEmpty(baseContentVersion)
             var pending = fields.intersection(.synced)
+            // 内容变更必须带本地文件：nil 会被当作空文件上传，在任何字段生效前拒绝，避免清空服务端内容
+            if pending.contains(.contents), !current.isFolder, contents == nil {
+                throw SyncError.cannotSynchronize("内容变更缺少本地文件")
+            }
             var appliedAny = false
             do {
                 if pending.contains(.filename), let newName, !Self.sameScalars(Self.normalizedName(newName), current.name) {
