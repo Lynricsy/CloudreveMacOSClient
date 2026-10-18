@@ -106,6 +106,22 @@ import Testing
         #expect(try !#require(ServerVersion.parse("4.11.9")).isSupported)
         #expect(ServerVersion.parse("abc") == nil)
     }
+
+    @Test func callbackErrorsDoNotLeakSecret() async throws {
+        let mock = MockTransport()
+        await mock.route("GET", "/api/v4/callback/s3/s1/") { _ in HTTPResponse(status: 200, body: Data("<html>".utf8)) }
+        await mock.route("POST", "/api/v4/callback/onedrive/s1/") { _ in HTTPResponse(status: 200, body: Data("<html>".utf8)) }
+        let client = CloudreveClient(site: Fixtures.site, transport: mock, tokens: nil, clientID: nil)
+        var errors: [any Error] = []
+        do { try await client.completeS3Callback(policyType: "s3", sessionID: "s1", secret: "top-secret") } catch { errors.append(error) }
+        do { try await client.completeOneDriveCallback(sessionID: "s1", secret: "top-secret") } catch { errors.append(error) }
+        try #require(errors.count == 2)
+        for error in errors {
+            #expect(!String(describing: error).contains("top-secret"))
+            #expect(!error.localizedDescription.contains("top-secret"))
+            #expect(String(describing: error).contains("/callback/"))
+        }
+    }
 }
 
 actor Counter {

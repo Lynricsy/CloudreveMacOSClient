@@ -37,10 +37,14 @@ public actor MockTransport: HTTPTransport {
         requests.filter { $0.method == method && Self.matches(prefix: pathPrefix, request: $0) }
     }
 
-    /// 设置了 `UploadBodyProgress.handler` 时，对非空 `.data` 请求体先后回报一半与全部字节（模拟发送过程）。
+    /// 文件请求体（`.file`）在记录中转为发送时的内容快照（`.data`），因为上传器发送后即删除暂存文件；
+    /// 路由处理器收到的仍是原始请求。设置了 `UploadBodyProgress.handler` 时，对非空文件请求体
+    /// 先后回报一半与全部字节（模拟发送过程，与 URLSessionTransport 只对 `.file` 回报一致）。
     public func send(_ request: HTTPRequest) async throws -> HTTPResponse {
-        requests.append(request)
-        if let report = UploadBodyProgress.handler, case .data(let body) = request.body, !body.isEmpty {
+        var recorded = request
+        if case .file = request.body { recorded.body = .data(request.bodyData ?? Data()) }
+        requests.append(recorded)
+        if let report = UploadBodyProgress.handler, case .data(let body) = recorded.body, case .file = request.body, !body.isEmpty {
             report(Int64(body.count / 2))
             report(Int64(body.count))
         }

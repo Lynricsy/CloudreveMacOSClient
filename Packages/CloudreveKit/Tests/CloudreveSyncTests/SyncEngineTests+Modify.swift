@@ -68,7 +68,7 @@ extension SyncEngineTests {
     @Test func modifyFirstStepFailureThrows() async throws {
         let (env, entity) = try await Self.modifyFixture()
         env.server.failNext("POST", "/api/v4/file/rename", code: 40004)
-        await #expect(throws: SyncError.filenameCollision) {
+        await #expect(throws: SyncError.filenameCollision(existing: nil)) {
             try await Self.modify(env, fields: [.filename, .parent], newName: "b.txt", newParentID: "dst", base: entity)
         }
         #expect(try env.record("a")?.uri == .my("/name.txt"))
@@ -110,9 +110,33 @@ extension SyncEngineTests {
         let conflictRows = transfers.filter { $0.itemID == "a" }
         #expect(conflictRows.count == 2)
         #expect(conflictRows.allSatisfy { $0.state == .failed })
-        // 另存副本的那次传输以「版本冲突」开头（App 据此发冲突通知）
-        let conflictErrors = conflictRows.compactMap(\.error).filter { $0.hasPrefix("版本冲突") }
-        #expect(conflictErrors == ["版本冲突，已另存为 \(copyName)"])
-        #expect(transfers.contains { $0.name == copyName && $0.state == .done })
+        // 两条冲突分支（报冲突、另存副本）都标记 isConflict（App 据此发冲突通知）
+        #expect(conflictRows.allSatisfy { $0.isConflict })
+        #expect(conflictRows.compactMap(\.error).contains("版本冲突，已另存为 \(copyName)"))
+        #expect(transfers.contains { $0.name == copyName && $0.state == .done && !$0.isConflict })
+    }
+
+    /// 系统未提供基准版本：以镜像 entity 作为乐观锁，服务端已被别处修改时按冲突处理，不得无锁覆盖。
+    @Test func modifyWithoutBaseUsesMirrorEntityAsLock() async throws {
+        let (env, _) = try await Self.modifyFixture()
+        let remote = Data("edited elsewhere".utf8)
+        env.server.replaceContent("/name.txt", with: remote)
+        await #expect(throws: SyncError.versionConflict) {
+            try await Self.modify(env, fields: [.contents], content: Data("mine".utf8), base: nil, failOnConflict: true)
+        }
+        #expect(env.server.node("/name.txt")?.content == remote)
+        #expect(try env.transfers.recent(driveID: env.driveID).first?.isConflict == true)
+    }
+
+    /// 镜像也没有 entity：先查服务端，服务端已有内容则按冲突处理。
+    @Test func modifyWithoutAnyVersionRefusesToOverwriteServerContent() async throws {
+        let (env, _) = try await Self.modifyFixture()
+        var record = try #require(try env.record("a"))
+        record.entityID = ""
+        try env.items.upsert([record])
+        await #expect(throws: SyncError.versionConflict) {
+            try await Self.modify(env, fields: [.contents], content: Data("mine".utf8), base: nil, failOnConflict: true)
+        }
+        #expect(env.server.node("/name.txt")?.content == Self.original)
     }
 }

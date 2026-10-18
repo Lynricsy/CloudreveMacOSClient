@@ -10,6 +10,9 @@ public enum Migrations {
         migrator.registerMigration("v2") { db in
             try db.execute(sql: v2)
         }
+        migrator.registerMigration("v3") { db in
+            try db.execute(sql: v3)
+        }
         return migrator
     }
 
@@ -105,5 +108,10 @@ public enum Migrations {
             created_at DOUBLE NOT NULL
         );
         CREATE INDEX remote_event_drive_seq ON remote_event(drive_id, seq);
+        """
+
+    /// 传输记录标记版本冲突（App 的冲突通知依据此列，不再匹配错误文本）。
+    private static let v3 = """
+        ALTER TABLE transfer ADD COLUMN is_conflict BOOLEAN NOT NULL DEFAULT 0;
         """
 }

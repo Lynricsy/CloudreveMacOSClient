@@ -1,3 +1,8 @@
+#if canImport(CryptoKit)
+import CryptoKit
+#else
+import Crypto
+#endif
 import Foundation
 import Synchronization
 import Testing
@@ -8,6 +13,12 @@ enum UploaderFixtures {
     static let sessionID = "s1"
     static let secret = "secret"
     static let uri = CloudreveURI.my("docs/a.txt")
+
+    /// 小写十六进制 SHA-256（与上传器记录的分片摘要格式一致）。
+    static func sha256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
     static let file = FileResponse(
         type: 0, id: "f1", name: "a.txt", createdAt: Date(timeIntervalSince1970: 1_700_000_000),
         updatedAt: Date(timeIntervalSince1970: 1_700_000_000), size: 10, path: "/docs/a.txt", primaryEntity: "e2"
@@ -54,17 +65,36 @@ enum UploaderFixtures {
         await mock.route("GET", "/api/v4/file/info") { _ in try .envelope(encoding: file) }
     }
 
+    /// 依次返回 `ids` 对应的会话（最后一个重复使用），用于区分新建与复用。
+    static func routeSessions(_ mock: MockTransport, ids: [String], make: @escaping @Sendable (String) -> UploadSession) async {
+        let counter = Counter()
+        await mock.route("PUT", "/api/v4/file/upload") { _ in
+            let index = min(await counter.increment(), ids.count) - 1
+            return try .envelope(encoding: make(ids[index]))
+        }
+    }
+
+    static let lastModified = Date(timeIntervalSince1970: 1_700_000_000)
+
     static func upload(
-        _ uploader: Uploader, data: Data, overwrite: OverwriteMode = .create, progress: ProgressLog = ProgressLog()
+        _ uploader: Uploader, data: Data, overwrite: OverwriteMode = .create, lastModified: Date = lastModified,
+        progress: ProgressLog = ProgressLog()
     ) async throws -> FileResponse {
         let fileURL = try tempFile(data)
         defer { try? FileManager.default.removeItem(at: fileURL) }
         return try await uploader.upload(
             fileURL: fileURL, size: Int64(data.count), to: uri, mimeType: "text/plain",
-            lastModified: Date(timeIntervalSince1970: 1_700_000_000), overwrite: overwrite,
+            lastModified: lastModified, overwrite: overwrite,
             progress: { done, _ in progress.append(done) }
         )
     }
+}
+
+/// 线程安全的记录器（在路由处理器中收集观察结果）。
+final class Recorder<Value: Sendable>: Sendable {
+    private let storage = Mutex<[Value]>([])
+    func append(_ value: Value) { storage.withLock { $0.append(value) } }
+    var values: [Value] { storage.withLock { $0 } }
 }
 
 /// 记录 `sleep` 调用（测试不真正等待）。

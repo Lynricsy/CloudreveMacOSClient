@@ -15,8 +15,18 @@ public final class InMemoryUploadProgressStore: UploadProgressStore {
         sessions.withLock { $0[session.uri] = session }
     }
 
-    public func markChunk(uri: String, index: Int, etag: String?) throws {
-        sessions.withLock { $0[uri]?.chunksDone[index] = .some(etag) }
+    public func markChunk(uri: String, index: Int, etag: String?, digest: String) throws {
+        sessions.withLock { sessions in
+            sessions[uri]?.chunksDone[index] = .some(etag)
+            sessions[uri]?.chunkDigests[index] = digest
+        }
+    }
+
+    public func markStage(uri: String, stage: UploadStage) throws {
+        sessions.withLock { sessions in
+            guard let current = sessions[uri]?.stage, current < stage else { return }
+            sessions[uri]?.stage = stage
+        }
     }
 
     public func deleteSession(uri: String) throws {

@@ -6,8 +6,6 @@ import Foundation
 @MainActor
 final class ActivityPoller {
     static let interval: Duration = .seconds(30)
-    /// 同步引擎写入冲突失败记录时使用的错误前缀（见 `SyncEngine.modify`）。
-    static let conflictPrefix = "版本冲突"
 
     private let driveStore: DriveStore
     private let transferStore: TransferStore
@@ -66,8 +64,8 @@ final class ActivityPoller {
         let failures = try transferStore.unnotifiedFailures()
         guard !failures.isEmpty else { return }
         if preferences.notifyFileConflict {
-            for failure in failures {
-                guard let message = failure.error, message.hasPrefix(Self.conflictPrefix) else { continue }
+            for failure in failures where failure.isConflict {
+                let message = failure.error ?? String(localized: "文件版本冲突")
                 await NotificationService.notifyConflict(transferID: failure.id, fileName: failure.name, message: message)
             }
         }

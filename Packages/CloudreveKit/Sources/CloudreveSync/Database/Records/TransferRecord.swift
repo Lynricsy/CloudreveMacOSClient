@@ -18,11 +18,13 @@ public struct TransferRecord: SyncRecord, Equatable, Identifiable {
     public var startedAt: Date
     public var finishedAt: Date?
     public var notified: Bool
+    /// 因内容版本冲突而失败（另存冲突副本或按要求报冲突），App 据此发冲突通知。
+    public var isConflict: Bool
 
     public init(
         id: String, driveID: String, kind: TransferKind, itemID: String?, name: String, uri: String,
         totalBytes: Int64, doneBytes: Int64 = 0, state: TransferState = .running, error: String? = nil,
-        startedAt: Date, finishedAt: Date? = nil, notified: Bool = false
+        startedAt: Date, finishedAt: Date? = nil, notified: Bool = false, isConflict: Bool = false
     ) {
         self.id = id
         self.driveID = driveID
@@ -37,6 +39,7 @@ public struct TransferRecord: SyncRecord, Equatable, Identifiable {
         self.startedAt = startedAt
         self.finishedAt = finishedAt
         self.notified = notified
+        self.isConflict = isConflict
     }
 
     enum CodingKeys: String, CodingKey {
@@ -47,5 +50,6 @@ public struct TransferRecord: SyncRecord, Equatable, Identifiable {
         case doneBytes = "done_bytes"
         case startedAt = "started_at"
         case finishedAt = "finished_at"
+        case isConflict = "is_conflict"
     }
 }

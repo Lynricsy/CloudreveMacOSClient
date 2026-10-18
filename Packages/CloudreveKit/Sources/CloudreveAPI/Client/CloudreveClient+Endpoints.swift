@@ -137,10 +137,11 @@ extension CloudreveClient {
         try await request("PUT", "/file/upload", body: .encoding(body))
     }
 
-    public func uploadChunk(sessionID: String, index: Int, data: Data) async throws {
+    /// 上传本机/中转策略的分片；`body` 通常为磁盘暂存文件（`.file`），不整体读入内存。
+    public func uploadChunk(sessionID: String, index: Int, body: HTTPBody) async throws {
         let _: EmptyData = try await request(
             "POST", "/file/upload/\(Self.escapePath(sessionID))/\(index)",
-            body: .raw(.data(data), contentType: "application/octet-stream")
+            body: .raw(body, contentType: "application/octet-stream")
         )
     }
 
@@ -156,6 +157,12 @@ extension CloudreveClient {
 
     public func completeOneDriveCallback(sessionID: String, secret: String) async throws {
         let path = "/callback/onedrive/\(Self.escapePath(sessionID))/\(Self.escapePath(secret))"
+        let _: EmptyData = try await request("POST", path, authenticated: false)
+    }
+
+    /// 华为 OBS 完成回调：`POST /callback/obs/{session_id}/{key}`（与 s3/ks3/cos 的 GET 不同）。
+    public func completeOBSCallback(sessionID: String, secret: String) async throws {
+        let path = "/callback/obs/\(Self.escapePath(sessionID))/\(Self.escapePath(secret))"
         let _: EmptyData = try await request("POST", path, authenticated: false)
     }
 

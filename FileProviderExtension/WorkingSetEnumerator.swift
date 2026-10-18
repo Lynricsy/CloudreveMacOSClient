@@ -23,7 +23,7 @@ final class WorkingSetEnumerator: NSObject, NSFileProviderEnumerator {
                 box.value.didEnumerate(items.map(runtime.item))
                 box.value.finishEnumerating(upTo: next.map { NSFileProviderPage(rawValue: SyncAnchorCodec.encode($0)) })
             } catch {
-                box.value.finishEnumeratingWithError(FileProviderBridge.nsError(error))
+                box.value.finishEnumeratingWithError(runtime.nsError(error))
             }
         }
     }

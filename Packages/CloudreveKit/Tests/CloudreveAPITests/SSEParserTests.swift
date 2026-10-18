@@ -31,6 +31,28 @@ import Testing
         #expect(parser.feed(Data(bytes[7...])) == [SSEEvent(name: nil, data: "中文")])
     }
 
+    @Test func bareCRLineEndings() {
+        var parser = SSEParser()
+        let text = "event: event\rdata: {\"a\":1}\r\revent: keep-alive\r\r"
+        #expect(parser.feed(Data(text.utf8)).map(\.name) == ["event", "keep-alive"])
+    }
+
+    @Test func crlfSplitAcrossChunksIsOneLineEnding() {
+        var parser = SSEParser()
+        // 第一块以 CR 结尾、第二块以 LF 开头：仍是一个 CRLF，不得多出一个空行提前派发事件
+        #expect(parser.feed(Data("data: a\r".utf8)).isEmpty)
+        #expect(parser.feed(Data("\ndata: b\r".utf8)).isEmpty)
+        #expect(parser.feed(Data("\n\r".utf8)) == [SSEEvent(name: nil, data: "a\nb")])
+        #expect(parser.feed(Data("\n".utf8)).isEmpty)
+        #expect(parser.feed(Data("data: c\n\n".utf8)) == [SSEEvent(name: nil, data: "c")])
+    }
+
+    @Test func mixedLineEndings() {
+        var parser = SSEParser()
+        let text = "data: 1\rdata: 2\ndata: 3\r\n\n"
+        #expect(parser.feed(Data(text.utf8)) == [SSEEvent(name: nil, data: "1\n2\n3")])
+    }
+
     @Test func fileEventsStreamParsesAndRejectsDisabledPush() async throws {
         let mock = MockTransport()
         await mock.streamRoute("GET", "/api/v4/file/events") { request in

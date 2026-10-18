@@ -37,6 +37,11 @@ struct ExtensionRuntime: Sendable {
         FileProviderItem(item, rootID: rootID)
     }
 
+    /// 引擎错误 → 系统错误（冲突错误需要 rootID 构造已存在条目）。
+    func nsError(_ error: any Error) -> NSError {
+        FileProviderBridge.nsError(error, rootID: rootID)
+    }
+
     /// 系统标识符原始值 → 引擎 id（在 Task 外取 rawValue，避免捕获非 Sendable 的系统类型）。
     func syncID(raw: String) -> String {
         FileProviderBridge.syncID(NSFileProviderItemIdentifier(raw), rootID: rootID)

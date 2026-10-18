@@ -5,12 +5,16 @@ public enum SyncError: Error, Sendable, Equatable {
     case notAuthenticated
     case serverUnreachable
     case noSuchItem
-    case filenameCollision
+    /// 目标位置已有同名（大小写不敏感、Unicode 规范等价）条目；已知冲突条目时带上，供扩展构造冲突错误。
+    case filenameCollision(existing: SyncItem?)
     case insufficientQuota
     case syncAnchorExpired
     case versionConflict
     case excludedFromSync
     case directoryNotEmpty
+    /// 删除前服务端内容已变化（与系统给出的基准版本不同），拒绝删除。`latest` 为已写回镜像的服务端最新条目，
+    /// 供扩展构造拒绝删除错误。
+    case deletionRejected(latest: SyncItem?)
     case cannotSynchronize(String)
 }
 
@@ -26,6 +30,7 @@ extension SyncError: LocalizedError {
         case .versionConflict: return "文件版本冲突"
         case .excludedFromSync: return "文件被忽略规则排除"
         case .directoryNotEmpty: return "目录不为空"
+        case .deletionRejected: return "文件已在服务器上更改，未删除"
         case .cannotSynchronize(let message): return message
         }
     }

@@ -49,19 +49,34 @@ public actor TokenManager {
         let task = Task { [driveID, store, refresh, now] in
             guard let current = try store.load(driveID: driveID) else { throw CloudreveAPIError.credentialInvalid }
             guard current.refreshExpires > now() else { throw CloudreveAPIError.credentialInvalid }
+            let renewed: Credentials
             do {
-                let renewed = try await refresh(current.refreshToken)
-                try store.save(renewed, driveID: driveID)
-                return renewed
+                renewed = try await refresh(current.refreshToken)
             } catch let error as CloudreveAPIError {
+                // 旧 refresh token 被拒可能是另一进程已重新授权：存储里已有新凭证则直接使用
+                if let replaced = try Self.replacement(of: current, in: store, driveID: driveID) { return replaced }
                 if let code = error.serverCode, CloudreveAPIError.credentialCodes.contains(code) {
                     throw CloudreveAPIError.credentialInvalid
                 }
                 throw error
             }
+            // 刷新在途期间凭证可能已被另一进程重新授权或随云盘移除：在存储锁内比对后再写回，
+            // 迟到的结果不得覆盖新凭证（改用新凭证）或复活已删除的条目（抛凭证失效）。
+            let stored = try store.update(driveID: driveID) { latest in
+                guard let latest else { throw CloudreveAPIError.credentialInvalid }
+                return latest.refreshToken == current.refreshToken ? renewed : nil
+            }
+            guard let stored else { throw CloudreveAPIError.credentialInvalid }
+            return stored
         }
         inflight = task
         defer { inflight = nil }
         return try await task.value
+    }
+
+    /// 重新读取存储：refresh token 已被替换时返回新凭证；条目已删除时抛 `.credentialInvalid`；未变化返回 nil。
+    private static func replacement(of used: Credentials, in store: any CredentialStore, driveID: String) throws -> Credentials? {
+        guard let latest = try store.load(driveID: driveID) else { throw CloudreveAPIError.credentialInvalid }
+        return latest.refreshToken == used.refreshToken ? nil : latest
     }
 }

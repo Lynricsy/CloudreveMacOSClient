@@ -31,6 +31,16 @@
         }
       }
     },
+    "%lld 个云盘%@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld drives: %2$@"
+          }
+        }
+      }
+    },
     "Cloudreve 官网": {
       "localizations": {
         "en": {
@@ -381,6 +391,16 @@
         }
       }
     },
+    "当前没有传输": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No transfers in progress"
+          }
+        }
+      }
+    },
     "推送中断，定期同步": {
       "localizations": {
         "en": {
@@ -431,12 +451,12 @@
         }
       }
     },
-    "文件已是最新": {
+    "文件版本冲突": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Your files are up to date"
+            "value": "File version conflict"
           }
         }
       }
@@ -567,6 +587,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "The server version (%1$@) is too old; %2$@ or later is required"
+          }
+        }
+      }
+    },
+    "未启用文件提供程序": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "File Provider not enabled"
           }
         }
       }
@@ -969,6 +999,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Project Homepage"
+          }
+        }
+      }
+    },
+    "「%@」%@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%1$@”: %2$@"
           }
         }
       }

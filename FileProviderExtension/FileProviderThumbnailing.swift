@@ -29,7 +29,7 @@ extension FileProviderExtension: NSFileProviderThumbnailing {
                             let data = try await FileProviderExtension.thumbnail(runtime: runtime, id: runtime.syncID(raw: rawID))
                             perItem.value(identifier, data, nil)
                         } catch {
-                            perItem.value(identifier, nil, FileProviderBridge.nsError(error))
+                            perItem.value(identifier, nil, runtime.nsError(error))
                         }
                     }
                 }

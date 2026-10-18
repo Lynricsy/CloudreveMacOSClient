@@ -4,16 +4,21 @@ import Foundation
 extension SyncEngine {
     /// 依次应用 文件名 → 父目录 → 内容。某步失败时，若之前已有步骤成功则返回剩余字段让系统稍后重试，
     /// 否则抛错。日期、扩展属性、标签等字段不同步，视为已应用。
+    ///
+    /// 内容以乐观锁覆盖：`baseContentVersion` 为 nil 表示系统未提供可靠版本，此时以镜像记录的 entity 为锁；
+    /// 镜像也没有 entity 时先查服务端，服务端已有内容则按冲突处理，不得无锁覆盖。
     public func modify(
         id: String, fields: ItemFields, newName: String?, newParentID: String?, contents: URL?, mtime: Date?,
         baseContentVersion: String?, failOnConflict: Bool, progress: @escaping ProgressHandler
     ) async throws -> ModifyResult {
         try await run {
             var current = try self.localItem(id: id)
+            // 重命名/移动会用服务端返回值刷新 entity，锁必须取修改前镜像中的版本
+            let lock = Self.nonEmpty(baseContentVersion) ?? Self.nonEmpty(current.entityID)
             var pending = fields.intersection(.synced)
             var appliedAny = false
             do {
-                if pending.contains(.filename), let newName, newName != current.name {
+                if pending.contains(.filename), let newName, !Self.sameScalars(Self.normalizedName(newName), current.name) {
                     current = try await self.renameItem(id: id, newName: newName)
                     appliedAny = true
                 }
@@ -26,7 +31,7 @@ extension SyncEngine {
                 if pending.contains(.contents), !current.isFolder {
                     let result = try await self.replaceContents(
                         of: current, contents: contents, mtime: mtime ?? self.now(),
-                        baseContentVersion: baseContentVersion, failOnConflict: failOnConflict, progress: progress
+                        lock: lock, failOnConflict: failOnConflict, progress: progress
                     )
                     if result.shouldFetchContent { return result }
                     current = result.item
@@ -41,22 +46,24 @@ extension SyncEngine {
         }
     }
 
-    /// 以新版本覆盖内容；`previous` 乐观锁冲突时按 `failOnConflict` 抛错或另存冲突副本。
+    /// 以新版本覆盖内容；`lock` 乐观锁冲突时按 `failOnConflict` 抛错或另存冲突副本。
     private func replaceContents(
-        of item: SyncItem, contents: URL?, mtime: Date, baseContentVersion: String?, failOnConflict: Bool,
+        of item: SyncItem, contents: URL?, mtime: Date, lock: String?, failOnConflict: Bool,
         progress: @escaping ProgressHandler
     ) async throws -> ModifyResult {
         guard let parentID = item.parentID else { throw SyncError.cannotSynchronize("不能修改云盘根目录内容") }
-        let previous = baseContentVersion.flatMap { $0.isEmpty ? nil : $0 }
         let transfer = try makeTransfer(uri: item.uri, itemID: item.id, contents: contents)
         do {
-            let file = try await upload(contents: contents, to: item.uri, mtime: mtime, overwrite: .version(previous: previous),
+            if lock == nil, Self.nonEmpty(try await client.fileInfo(id: item.id).primaryEntity) != nil {
+                throw SyncError.versionConflict
+            }
+            let file = try await upload(contents: contents, to: item.uri, mtime: mtime, overwrite: .version(previous: lock),
                                         transfer: transfer, progress: progress)
             transfer.finish(error: nil)
             return ModifyResult(item: try store(file, parentID: parentID, uri: item.uri), pendingFields: [], shouldFetchContent: false)
-        } catch let error as CloudreveAPIError where [40076, 40004].contains(error.serverCode ?? 0) {
+        } catch where Self.isVersionConflict(error) {
             guard !failOnConflict else {
-                transfer.finish(error: Self.describe(SyncError.versionConflict))
+                transfer.finish(error: Self.describe(SyncError.versionConflict), isConflict: true)
                 throw SyncError.versionConflict
             }
             return try await saveConflictCopy(of: item, parentID: parentID, contents: contents, mtime: mtime,
@@ -65,6 +72,11 @@ extension SyncEngine {
             transfer.finish(error: Self.describe(error))
             throw error
         }
+    }
+
+    private static func isVersionConflict(_ error: any Error) -> Bool {
+        if let apiError = error as? CloudreveAPIError { return [40076, 40004].contains(apiError.serverCode ?? 0) }
+        return error as? SyncError == .versionConflict
     }
 
     /// 把本地内容另存为同目录下的冲突副本，原条目回到服务端版本（系统随后重新下载）。
@@ -83,10 +95,10 @@ extension SyncEngine {
             try store(copy, parentID: parentID, uri: copyURI)
         } catch {
             copyTransfer.finish(error: Self.describe(error))
-            transfer.finish(error: "版本冲突，另存副本失败：\(Self.describe(error))")
+            transfer.finish(error: "版本冲突，另存副本失败：\(Self.describe(error))", isConflict: true)
             throw error
         }
-        transfer.finish(error: "版本冲突，已另存为 \(copyName)")
+        transfer.finish(error: "版本冲突，已另存为 \(copyName)", isConflict: true)
         Log.shared.info("engine", "内容冲突：\(item.uri) 本地版本已另存为 \(copyName)")
         let server = try await client.fileInfo(uri: item.uri)
         let current = try store(server, parentID: parentID, uri: item.uri)

@@ -48,25 +48,55 @@ enum FileProviderBridge {
 
     // MARK: - 版本
 
+    /// 系统版本 → 引擎内容版本（entityID）。`beforeFirstSyncComponent` 表示系统从未确认过与服务端同步的版本，
+    /// 不是真实 entityID，返回 nil（引擎据此改用镜像记录做乐观锁）。
     static func contentVersion(_ version: NSFileProviderItemVersion?) -> String? {
-        guard let data = version?.contentVersion, !data.isEmpty else { return nil }
+        guard let data = version?.contentVersion, !data.isEmpty,
+              data != NSFileProviderItemVersion.beforeFirstSyncComponent else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
     // MARK: - 错误
 
-    /// 引擎错误 → NSFileProviderError；非 SyncError 先经 SyncErrorMapper。
-    static func nsError(_ error: any Error) -> NSError {
-        let mapped = SyncErrorMapper.map(error)
-        if mapped is CancellationError {
+    /// 引擎错误 → 系统错误（只允许 NSCocoaErrorDomain / NSFileProviderErrorDomain）。
+    ///
+    /// 只有 SyncError 才映射为 NSFileProviderError；其余错误（钥匙串、本地文件、网络栈等）不能一律当成
+    /// `.cannotSynchronize`——系统收到它后不再自动重试 create/modify。按 SDK 约定：Cocoa 域原样返回，
+    /// 其他域包成 `NSXPCConnectionReplyInvalid` 并附带原错误，系统视为暂时性错误并重试。
+    static func nsError(_ error: any Error, rootID: String) -> NSError {
+        if error is CancellationError {
             return NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError)
         }
-        guard let syncError = mapped as? SyncError else {
-            return NSFileProviderError(.cannotSynchronize) as NSError
+        if let syncError = error as? SyncError {
+            return nsError(syncError, rootID: rootID)
         }
-        // 附带中文描述，便于在 Finder 与日志中查看原因
-        let userInfo = [NSLocalizedDescriptionKey: syncError.localizedDescription]
-        return NSFileProviderError(code(for: syncError), userInfo: userInfo) as NSError
+        if error is CloudreveAPIError {
+            let mapped = SyncErrorMapper.map(error)
+            if let syncError = mapped as? SyncError { return nsError(syncError, rootID: rootID) }
+            return wrapped(mapped as NSError)
+        }
+        return wrapped(error as NSError)
+    }
+
+    private static func nsError(_ error: SyncError, rootID: String) -> NSError {
+        switch error {
+        case .filenameCollision(existing: let existing?):
+            // SDK 要求带上已存在的条目，系统据此改名其中一方后重试
+            return NSError.fileProviderErrorForCollision(with: FileProviderItem(existing, rootID: rootID))
+        case .deletionRejected(latest: let latest?):
+            // 带上服务端最新条目，系统据此恢复被删的本地文件
+            return NSError.fileProviderErrorForRejectedDeletion(of: FileProviderItem(latest, rootID: rootID))
+        default:
+            // 附带中文描述，便于在 Finder 与日志中查看原因
+            let userInfo = [NSLocalizedDescriptionKey: error.localizedDescription]
+            return NSFileProviderError(code(for: error), userInfo: userInfo) as NSError
+        }
+    }
+
+    private static func wrapped(_ error: NSError) -> NSError {
+        if error.domain == NSCocoaErrorDomain || error.domain == NSFileProviderErrorDomain { return error }
+        let userInfo: [String: Any] = [NSUnderlyingErrorKey: error, NSLocalizedDescriptionKey: error.localizedDescription]
+        return NSError(domain: NSCocoaErrorDomain, code: NSXPCConnectionReplyInvalid, userInfo: userInfo)
     }
 
     static func code(for error: SyncError) -> NSFileProviderError.Code {
@@ -80,6 +110,7 @@ enum FileProviderBridge {
         case .versionConflict: return .localVersionConflictingWithServer
         case .excludedFromSync: return .excludedFromSync
         case .directoryNotEmpty: return .directoryNotEmpty
+        case .deletionRejected: return .deletionRejected
         case .cannotSynchronize: return .cannotSynchronize
         }
     }

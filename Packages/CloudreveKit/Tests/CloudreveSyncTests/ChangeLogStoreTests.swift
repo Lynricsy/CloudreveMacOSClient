@@ -46,4 +46,18 @@ import Testing
         try log.append(driveID: "d1", itemID: "after", kind: .update)
         #expect(try log.latestSeq(driveID: "d1") == 30002)
     }
+
+    /// anchor 校验与读取在同一快照：裁剪边界之外或超过最新序号返回 nil，边界之内正常读取。
+    @Test func retainedChangesChecksAnchorInSameRead() throws {
+        let db = try DBFixtures.database(drives: ["d1"])
+        let log = ChangeLog(db: db)
+        #expect(try log.retainedChanges(driveID: "d1", afterSeq: 0, limit: 10) == [])
+        #expect(try log.retainedChanges(driveID: "d1", afterSeq: 1, limit: 10) == nil)
+        try log.appendMany(driveID: "d1", itemIDs: (1...10).map { "i\($0)" }, kind: .update)
+        try log.prune(driveID: "d1", keepLast: 5)
+        #expect(try log.retainedChanges(driveID: "d1", afterSeq: 4, limit: 10) == nil)
+        #expect(try log.retainedChanges(driveID: "d1", afterSeq: 5, limit: 2)?.map(\.itemID) == ["i6", "i7"])
+        #expect(try log.retainedChanges(driveID: "d1", afterSeq: 10, limit: 10) == [])
+        #expect(try log.retainedChanges(driveID: "d1", afterSeq: 11, limit: 10) == nil)
+    }
 }

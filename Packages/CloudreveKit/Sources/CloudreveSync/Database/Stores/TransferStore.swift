@@ -28,18 +28,18 @@ public struct TransferStore: Sendable {
         }
     }
 
-    /// 结束传输：`error` 为 nil → `done`（已传字节补齐为总量），否则 `failed`。
-    public func finish(id: String, error: String?) throws {
+    /// 结束传输：`error` 为 nil → `done`（已传字节补齐为总量），否则 `failed`。`isConflict` 标记版本冲突。
+    public func finish(id: String, error: String?, isConflict: Bool = false) throws {
         let state: TransferState = error == nil ? .done : .failed
         let finishedAt = now().timeIntervalSince1970
         try db.write { db in
             try db.execute(
                 sql: """
-                    UPDATE transfer SET state = ?, error = ?, finished_at = ?,
+                    UPDATE transfer SET state = ?, error = ?, finished_at = ?, is_conflict = ?,
                         done_bytes = CASE WHEN ? THEN total_bytes ELSE done_bytes END
                     WHERE id = ?
                     """,
-                arguments: [state, error, finishedAt, error == nil, id]
+                arguments: [state, error, finishedAt, isConflict, error == nil, id]
             )
         }
     }

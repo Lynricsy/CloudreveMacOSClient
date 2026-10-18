@@ -34,8 +34,8 @@ final class TransferProgress: Sendable {
         if due { try? store.progress(id: id, done: done) }
     }
 
-    func finish(error: String?) {
+    func finish(error: String?, isConflict: Bool = false) {
         guard let id else { return }
-        try? store.finish(id: id, error: error)
+        try? store.finish(id: id, error: error, isConflict: isConflict)
     }
 }

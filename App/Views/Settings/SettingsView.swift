@@ -16,7 +16,9 @@ struct SettingsView: View {
                 AboutView()
             }
         }
-        .onAppear { driveManager.reload() }
+        // 可见期间持续反映扩展与事件监听写入的云盘状态（如凭证失效、推送中断）。
+        .onAppear { driveManager.startPolling(for: .settings) }
+        .onDisappear { driveManager.stopPolling(for: .settings) }
         .actionErrorAlert(driveManager)
     }
 }

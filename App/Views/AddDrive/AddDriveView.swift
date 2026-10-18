@@ -24,5 +24,7 @@ struct AddDriveView: View {
                 model = AddDriveViewModel(request: request, driveManager: driveManager)
             }
         }
+        // 关闭窗口即放弃流程：结束授权会话，设置阶段不再写凭证、数据库或注册域。
+        .onDisappear { model?.cancel() }
     }
 }

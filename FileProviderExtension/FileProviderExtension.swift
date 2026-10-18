@@ -44,13 +44,10 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         let rawID = itemIdentifier.rawValue
         let version = FileProviderBridge.contentVersion(requestedVersion)
         let progress = Progress(totalUnitCount: 100)
-        let tracker = SendableBox(progress)
+        let track = Self.tracking(progress)
         return launch(progress: progress, onError: { reply.value(nil, nil, $0) }, body: { runtime in
             let url = try runtime.manager.value.temporaryDirectoryURL().appending(path: UUID().uuidString)
-            let item = try await runtime.engine.download(id: runtime.syncID(raw: rawID), version: version, to: url) { done, total in
-                tracker.value.totalUnitCount = max(total, 1)
-                tracker.value.completedUnitCount = done
-            }
+            let item = try await runtime.engine.download(id: runtime.syncID(raw: rawID), version: version, to: url, progress: track)
             reply.value(url, runtime.item(item), nil)
         })
     }
@@ -71,16 +68,25 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
             completionHandler(nil, [], false, NSFileProviderError(.excludedFromSync))
             return Progress(totalUnitCount: 1)
         }
-        return launch(onError: { reply.value(nil, [], false, $0) }, body: { runtime in
+        let progress = Progress(totalUnitCount: 100)
+        let track = Self.tracking(progress)
+        return launch(progress: progress, onError: { reply.value(nil, [], false, $0) }, body: { runtime in
             let parentID = runtime.syncID(raw: parent)
-            let created: SyncItem
             if type.conforms(to: .folder) {
-                created = try await runtime.engine.createFolder(name: name, parentID: parentID, mayAlreadyExist: mayExist)
-            } else {
-                created = try await runtime.engine.createFile(
-                    name: name, parentID: parentID, contents: url, mtime: mtime, mayAlreadyExist: mayExist, progress: { _, _ in }
-                )
+                let created = try await runtime.engine.createFolder(name: name, parentID: parentID, mayAlreadyExist: mayExist)
+                reply.value(runtime.item(created), [], false, nil)
+                return
             }
+            // 重新导入 dataless 文件（无内容）且服务端没有可匹配的条目时引擎返回 nil：按 SDK 回 nil item，
+            // 系统随即删除本地占位，而不是在服务端凭空创建空文件。
+            guard let created = try await runtime.engine.createFile(
+                name: name, parentID: parentID, contents: url, mtime: mtime, mayAlreadyExist: mayExist, progress: track
+            ) else {
+                reply.value(nil, [], false, nil)
+                return
+            }
+            // shouldFetchContent 恒为 false：引擎只在返回条目内容与 url 一致（已上传或服务端相同），
+            // 或系统本就没有提供内容（本地是 dataless，按需再取）时返回条目；内容不同则抛 filenameCollision。
             reply.value(runtime.item(created), [], false, nil)
         })
     }
@@ -98,10 +104,12 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         let base = FileProviderBridge.contentVersion(version)
         let fields = FileProviderBridge.fields(changedFields)
         let failOnConflict = options.contains(.failOnConflict)
-        return launch(onError: { reply.value(nil, [], false, $0) }, body: { runtime in
+        let progress = Progress(totalUnitCount: 100)
+        let track = Self.tracking(progress)
+        return launch(progress: progress, onError: { reply.value(nil, [], false, $0) }, body: { runtime in
             let result = try await runtime.engine.modify(
                 id: runtime.syncID(raw: identifier), fields: fields, newName: name, newParentID: runtime.syncID(raw: parent),
-                contents: newContents, mtime: mtime, baseContentVersion: base, failOnConflict: failOnConflict, progress: { _, _ in }
+                contents: newContents, mtime: mtime, baseContentVersion: base, failOnConflict: failOnConflict, progress: track
             )
             reply.value(runtime.item(result.item), FileProviderBridge.fields(result.pendingFields), result.shouldFetchContent, nil)
         })
@@ -115,8 +123,9 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         let reply = SendableBox(completionHandler)
         let rawID = identifier.rawValue
         let recursive = options.contains(.recursive)
+        let base = FileProviderBridge.contentVersion(version)
         return launch(onError: { reply.value($0) }, body: { runtime in
-            try await runtime.engine.delete(id: runtime.syncID(raw: rawID), recursive: recursive)
+            try await runtime.engine.delete(id: runtime.syncID(raw: rawID), recursive: recursive, baseContentVersion: base)
             reply.value(nil)
         })
     }
@@ -131,11 +140,11 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         case .trashContainer:
             throw NSFileProviderError(.noSuchItem)
         default:
-            return FolderEnumerator(runtime: runtime, folderID: runtime.syncID(raw: containerItemIdentifier.rawValue))
+            return ItemEnumerator(runtime: runtime, itemID: runtime.syncID(raw: containerItemIdentifier.rawValue))
         }
     }
 
-    /// 桥接模板：在 Task 中执行异步操作，失败统一映射为 NSFileProviderError；取消 Progress 即取消 Task。
+    /// 桥接模板：在 Task 中执行异步操作，失败经 `FileProviderBridge.nsError` 映射为系统错误；取消 Progress 即取消 Task。
     func launch(
         progress: Progress = Progress(totalUnitCount: 1),
         onError: @escaping @Sendable (NSError) -> Void,
@@ -149,10 +158,19 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
             do {
                 try await body(runtime)
             } catch {
-                onError(FileProviderBridge.nsError(error))
+                onError(runtime.nsError(error))
             }
         }
         progress.cancellationHandler = { task.cancel() }
         return progress
+    }
+
+    /// 引擎的字节进度 → 返回给系统的 Progress。上传进度必须持续推进，否则系统会取消「不再取得进展」的上传。
+    static func tracking(_ progress: Progress) -> SyncEngine.ProgressHandler {
+        let tracker = SendableBox(progress)
+        return { done, total in
+            tracker.value.totalUnitCount = max(total, 1)
+            tracker.value.completedUnitCount = done
+        }
     }
 }

@@ -21,13 +21,11 @@ public final class URLSessionTransport: HTTPTransport {
         let urlRequest = Self.makeURLRequest(request)
         do {
             switch request.body {
-            case .data(let body) where UploadBodyProgress.handler != nil && !body.isEmpty:
-                return try await sendReportingProgress(urlRequest, body: body, handler: UploadBodyProgress.handler)
             case .none, .data:
                 let (data, response) = try await session.data(for: urlRequest)
                 return HTTPResponse(status: Self.status(of: response), headers: Self.headers(of: response), body: data)
             case .file(let fileURL):
-                return try await upload(urlRequest, fromFile: fileURL)
+                return try await upload(urlRequest, fromFile: fileURL, progress: UploadBodyProgress.handler)
             }
         } catch {
             throw Self.mapError(error)
@@ -54,22 +52,12 @@ public final class URLSessionTransport: HTTPTransport {
         return (head, stream)
     }
 
-    /// 上传请求体并经 `didSendBodyData` 回报已发送字节（Linux 的 FoundationNetworking 无该 API，退化为普通请求）。
-    private func sendReportingProgress(
-        _ urlRequest: URLRequest, body: Data, handler: (@Sendable (Int64) -> Void)?
+    /// 从磁盘文件流式上传请求体，并经 `didSendBodyData` 回报已发送字节
+    /// （Linux 的 FoundationNetworking 无该 API，不回报进度）。
+    private func upload(
+        _ urlRequest: URLRequest, fromFile fileURL: URL, progress: (@Sendable (Int64) -> Void)?
     ) async throws -> HTTPResponse {
         #if canImport(FoundationNetworking)
-        let (data, response) = try await session.data(for: urlRequest)
-        #else
-        var bodyless = urlRequest
-        bodyless.httpBody = nil
-        let delegate = BodySendProgressDelegate(handler: handler)
-        let (data, response) = try await session.upload(for: bodyless, from: body, delegate: delegate)
-        #endif
-        return HTTPResponse(status: Self.status(of: response), headers: Self.headers(of: response), body: data)
-    }
-
-    private func upload(_ urlRequest: URLRequest, fromFile fileURL: URL) async throws -> HTTPResponse {
         let session = self.session
         let box = TaskBox()
         return try await withTaskCancellationHandler {
@@ -91,6 +79,11 @@ public final class URLSessionTransport: HTTPTransport {
         } onCancel: {
             box.cancel()
         }
+        #else
+        let delegate = progress.map { BodySendProgressDelegate(handler: $0) }
+        let (data, response) = try await session.upload(for: urlRequest, fromFile: fileURL, delegate: delegate)
+        return HTTPResponse(status: Self.status(of: response), headers: Self.headers(of: response), body: data)
+        #endif
     }
 
     static func makeURLRequest(_ request: HTTPRequest) -> URLRequest {

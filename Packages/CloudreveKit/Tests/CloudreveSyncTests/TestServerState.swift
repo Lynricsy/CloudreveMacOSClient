@@ -52,11 +52,14 @@ struct PendingUpload: Sendable {
 struct ResponseOverride: Sendable {
     let method: String
     let path: String
+    /// 非 nil 时还要求查询参数 `uri` 等于该值。
+    var uri: String?
     let response: HTTPResponse
 
     /// `http` 开头按完整 URL 前缀匹配；以 `/` 结尾按路径前缀匹配；否则路径须完全相同。
     func matches(_ request: HTTPRequest) -> Bool {
         guard request.method == method else { return false }
+        if let uri, request.queryItems["uri"] != uri { return false }
         if path.hasPrefix("http") { return request.url.absoluteString.hasPrefix(path) }
         let requestPath = request.url.path
         return requestPath == path || (path.hasSuffix("/") && requestPath.hasPrefix(path))
@@ -87,8 +90,14 @@ struct ServerState: Sendable {
 
     // MARK: - 查询
 
+    /// 路径按 Unicode 标量逐个比较（与服务端按字节比较一致；Swift `String ==` 会把规范等价的名称视为相同）。
     func node(at segments: [String]) -> ServerNode? {
-        nodes.values.first { $0.segments == segments }
+        nodes.values.first { Self.hasPrefix($0.segments, segments) && $0.segments.count == segments.count }
+    }
+
+    static func hasPrefix(_ segments: [String], _ prefix: [String]) -> Bool {
+        segments.count >= prefix.count
+            && zip(segments, prefix).allSatisfy { $0.unicodeScalars.elementsEqual($1.unicodeScalars) }
     }
 
     func node(id: String) -> ServerNode? {
@@ -98,7 +107,7 @@ struct ServerState: Sendable {
     /// 直接子项，按名称排序。
     func children(of folder: ServerNode) -> [ServerNode] {
         nodes.values
-            .filter { $0.segments.count == folder.segments.count + 1 && $0.segments.starts(with: folder.segments) }
+            .filter { $0.segments.count == folder.segments.count + 1 && Self.hasPrefix($0.segments, folder.segments) }
             .sorted { $0.name < $1.name }
     }
 
@@ -150,7 +159,7 @@ struct ServerState: Sendable {
     /// 移动/重命名节点，后代路径一并改写。
     mutating func relocate(id: String, to newSegments: [String]) {
         guard let old = nodes[id]?.segments else { return }
-        for (key, node) in nodes where node.segments.count > old.count && node.segments.starts(with: old) {
+        for (key, node) in nodes where node.segments.count > old.count && Self.hasPrefix(node.segments, old) {
             nodes[key]?.segments = newSegments + node.segments.dropFirst(old.count)
         }
         nodes[id]?.segments = newSegments
@@ -161,7 +170,7 @@ struct ServerState: Sendable {
     /// 删除节点及其全部后代。
     mutating func removeTree(id: String) {
         guard let root = nodes[id]?.segments else { return }
-        nodes = nodes.filter { !$0.value.segments.starts(with: root) }
+        nodes = nodes.filter { !Self.hasPrefix($0.value.segments, root) }
     }
 
     /// 取出第一个匹配请求的一次性覆盖。

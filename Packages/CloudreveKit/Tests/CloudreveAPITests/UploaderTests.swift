@@ -136,8 +136,10 @@ import Testing
         let store = InMemoryUploadProgressStore()
         var stale = Fixture.session(type: "local", chunkSize: 4, expiresIn: 30)
         stale.sessionID = "old"
+        // 除过期外其余条件均满足（覆盖方式一致、分片 0 摘要与本地内容一致）
         try store.saveSession(StoredUploadSession(
-            uri: Fixture.uri.description, size: 10, policyType: "local", session: stale, chunksDone: [0: nil], createdAt: Date()
+            uri: Fixture.uri.description, size: 10, policyType: "local", session: stale, overwrite: .create,
+            chunksDone: [0: nil], chunkDigests: [0: Fixture.sha256(Fixture.bytes(4))], createdAt: Date()
         ))
         let uploader = Uploader(client: Fixture.client(mock), store: store, sleep: { _ in })
         _ = try await Fixture.upload(uploader, data: Fixture.bytes(10))
@@ -149,7 +151,7 @@ import Testing
         #expect(await mock.requests("POST", pathPrefix: "/api/v4/file/upload/old/").isEmpty)
     }
 
-    @Test func sessionOlderThanFileModificationIsReplaced() async throws {
+    @Test func legacySessionWithoutDigestsIsReplaced() async throws {
         let mock = MockTransport()
         await Fixture.routeSession(mock, Fixture.session(type: "local", chunkSize: 4))
         await mock.route("DELETE", "/api/v4/file/upload") { _ in .envelope() }
@@ -158,10 +160,9 @@ import Testing
         let store = InMemoryUploadProgressStore()
         var old = Fixture.session(type: "local", chunkSize: 4)
         old.sessionID = "old"
-        // 会话早于文件最后修改时间（Fixture 中为 1_700_000_000）：已传分片可能是旧内容，不得复用
+        // 旧版本记录没有分片摘要与覆盖方式：无法证明已传分片与当前内容一致，不得复用
         try store.saveSession(StoredUploadSession(
-            uri: Fixture.uri.description, size: 10, policyType: "local", session: old, chunksDone: [0: nil],
-            createdAt: Date(timeIntervalSince1970: 1_600_000_000)
+            uri: Fixture.uri.description, size: 10, policyType: "local", session: old, chunksDone: [0: nil], createdAt: Date()
         ))
         let uploader = Uploader(client: Fixture.client(mock), store: store, sleep: { _ in })
         _ = try await Fixture.upload(uploader, data: Fixture.bytes(10))

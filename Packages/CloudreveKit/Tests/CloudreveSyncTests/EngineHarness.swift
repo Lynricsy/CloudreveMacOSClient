@@ -2,6 +2,7 @@ import CloudreveAPI
 import Foundation
 import GRDB
 import Synchronization
+import Testing
 @testable import CloudreveSync
 
 /// 引擎测试环境：内存库（含云盘与根条目）+ `TestServer` + 已登录客户端 + 引擎。
@@ -21,8 +22,9 @@ struct EngineHarness: Sendable {
     var changeLog: ChangeLog { ChangeLog(db: db) }
     var transfers: TransferStore { TransferStore(db: db) }
 
-    static func make() async throws -> EngineHarness {
-        let db = try DBFixtures.database()
+    /// `remoteRoot` 为挂载根（默认服务端根 `/`）；非默认时调用方需先在服务端建出该目录。
+    static func make(remoteRoot: CloudreveURI = DBFixtures.rootURI) async throws -> EngineHarness {
+        let db = try DBFixtures.database(remoteRoot: remoteRoot)
         let server = await TestServer.start(rootID: DBFixtures.rootID)
         let valid = Credentials(
             accessToken: "access", refreshToken: "refresh",
@@ -66,6 +68,13 @@ struct EngineHarness: Sendable {
         try changeLog.latestSeq(driveID: driveID)
     }
 
+    /// 镜像中全部非根条目的 uri；断言其中没有扫描期暂存的占位路径（以 `\u{1}` 开头的首段）。
+    func mirrorPaths() throws -> [CloudreveURI] {
+        let uris = try items.descendants(driveID: driveID, uriPrefix: DBFixtures.rootURI).map(\.uri)
+        #expect(uris.allSatisfy { !($0.segments.first?.unicodeScalars.first == "\u{1}") }, "\(uris)")
+        return uris
+    }
+
     func driveStatus() throws -> DriveStatus? {
         try DriveStore(db: db).get(id: driveID)?.status
     }
@@ -102,4 +111,18 @@ final class ProgressRecorder: Sendable {
     }
 
     var last: Int64? { values.withLock { $0.last } }
+}
+
+extension SyncError {
+    /// 是否为 `.filenameCollision`（不论是否附带冲突条目）。
+    var isFilenameCollision: Bool {
+        if case .filenameCollision = self { return true }
+        return false
+    }
+
+    /// `.filenameCollision` 附带的冲突条目 id；其他错误或未附带时为 nil。
+    var collidingItemID: String? {
+        if case .filenameCollision(let existing) = self { return existing?.id }
+        return nil
+    }
 }

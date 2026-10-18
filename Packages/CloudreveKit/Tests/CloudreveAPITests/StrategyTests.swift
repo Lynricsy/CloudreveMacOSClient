@@ -54,7 +54,8 @@ import Testing
         let session = Fixture.session(type: "s3", chunkSize: 4, uploadURLs: Self.partURLs)
         await #expect(throws: CloudreveAPIError.http(status: 403, body: "<Error/>")) {
             _ = try await S3FamilyStrategy(variant: .s3).upload(
-                chunk: UploadChunk(index: 0, offset: 0, length: 1), data: Data([1]), session: session, client: Fixture.client(mock)
+                chunk: UploadChunk(index: 0, offset: 0, length: 1), body: .data(Data([1])),
+                session: session, client: Fixture.client(mock)
             )
         }
     }
@@ -64,9 +65,10 @@ import Testing
         await mock.route("POST", Self.completeURL) { _ in HTTPResponse(status: 200) }
         await mock.route("GET", "/api/v4/callback/cos/s1/secret") { _ in .envelope() }
         let session = Fixture.session(type: "cos", chunkSize: 4, completeURL: Self.completeURL)
-        try await S3FamilyStrategy(variant: .cos).complete(
-            session: session, etags: [2: "e3", 0: "e1", 1: "e2"], client: Fixture.client(mock)
-        )
+        let strategy = S3FamilyStrategy(variant: .cos)
+        let client = Fixture.client(mock)
+        try await strategy.merge(session: session, etags: [2: "e3", 0: "e1", 1: "e2"], client: client)
+        try await strategy.commit(session: session, client: client)
         let complete = try #require(await mock.requests("POST", pathPrefix: Self.completeURL).first)
         #expect(complete.headers["x-cos-forbid-overwrite"] == "true")
         #expect(body(complete) == Self.threePartXML)
@@ -77,7 +79,9 @@ import Testing
         let mock = MockTransport()
         await mock.route("POST", Self.completeURL) { _ in HTTPResponse(status: 200) }
         let session = Fixture.session(type: "oss", chunkSize: 4, completeURL: Self.completeURL)
-        try await S3FamilyStrategy(variant: .oss).complete(session: session, etags: [0: "e1"], client: Fixture.client(mock))
+        let strategy = S3FamilyStrategy(variant: .oss)
+        try await strategy.merge(session: session, etags: [0: "e1"], client: Fixture.client(mock))
+        try await strategy.commit(session: session, client: Fixture.client(mock))
         let requests = await mock.requests
         #expect(requests.count == 1)
         let complete = try #require(requests.first)
@@ -88,16 +92,26 @@ import Testing
         #expect(complete.body == HTTPBody.none)
     }
 
-    @Test func obsCompleteSendsXMLWithoutCallback() async throws {
+    /// OBS 合并后必须 POST `/callback/obs/{session_id}/{key}`（上游 routers/router.go `callback.POST("obs/:sessionID/:key")`）。
+    @Test func obsCompleteSendsXMLThenPostsCallback() async throws {
         let mock = MockTransport()
+        await Fixture.routeSession(mock, Fixture.session(
+            type: "obs", chunkSize: 4, uploadURLs: Self.partURLs, completeURL: Self.completeURL
+        ))
+        await mock.route("PUT", "https://s3.example.com/bucket/obj?partNumber=") { request in
+            HTTPResponse(status: 200, headers: ["ETag": "\"e\(request.queryItems["partNumber"] ?? "")\""])
+        }
         await mock.route("POST", Self.completeURL) { _ in HTTPResponse(status: 200) }
-        let session = Fixture.session(type: "obs", chunkSize: 4, completeURL: Self.completeURL)
-        try await S3FamilyStrategy(variant: .obs).complete(
-            session: session, etags: [0: "e1", 1: "e2", 2: "e3"], client: Fixture.client(mock)
-        )
-        let requests = await mock.requests
-        #expect(requests.count == 1)
-        #expect(body(requests.first) == Self.threePartXML)
+        await mock.route("POST", "/api/v4/callback/obs/s1/secret") { _ in .envelope() }
+        await Fixture.routeFileInfo(mock)
+        _ = try await uploadTenBytes(mock)
+        let complete = await mock.requests("POST", pathPrefix: Self.completeURL)
+        #expect(complete.count == 1)
+        #expect(body(complete.first) == Self.threePartXML)
+        let callbacks = await mock.requests("POST", pathPrefix: "/api/v4/callback/obs/s1/secret")
+        #expect(callbacks.count == 1)
+        #expect(callbacks.first?.headers["Authorization"] == nil)
+        #expect(await mock.requests("GET", pathPrefix: "/api/v4/callback/").isEmpty)
     }
 
     @Test func oneDriveSendsContentRangeAndCallback() async throws {
@@ -137,7 +151,8 @@ import Testing
         let session = Fixture.session(type: "remote", chunkSize: 4, uploadURLs: [nodeURL], credential: "c")
         await #expect(throws: CloudreveAPIError.server(code: 40001, message: "bad", correlationID: nil)) {
             _ = try await RemoteStrategy().upload(
-                chunk: UploadChunk(index: 0, offset: 0, length: 1), data: Data([1]), session: session, client: Fixture.client(mock)
+                chunk: UploadChunk(index: 0, offset: 0, length: 1), body: .data(Data([1])),
+                session: session, client: Fixture.client(mock)
             )
         }
     }
@@ -151,10 +166,10 @@ import Testing
         let client = Fixture.client(mock)
         let strategy = QiniuStrategy()
         let etag = try await strategy.upload(
-            chunk: UploadChunk(index: 1, offset: 4, length: 1), data: Data([1]), session: session, client: client
+            chunk: UploadChunk(index: 1, offset: 4, length: 1), body: .data(Data([1])), session: session, client: client
         )
         #expect(etag == "q2")
-        try await strategy.complete(session: session, etags: [1: "q2", 0: "q1"], client: client)
+        try await strategy.merge(session: session, etags: [1: "q2", 0: "q1"], client: client)
         let put = try #require(await mock.requests("PUT", pathPrefix: base).first)
         #expect(put.url.absoluteString == base + "/2")
         #expect(put.headers["Authorization"] == "UpToken tok")

@@ -27,12 +27,12 @@ enum DBFixtures {
     static let rootURI = CloudreveURI.my("/")
     static let epoch = Date(timeIntervalSince1970: 1_700_000_000)
 
-    static func drive(id: String = driveID) -> DriveRecord {
+    static func drive(id: String = driveID, remoteRoot: CloudreveURI = rootURI) -> DriveRecord {
         DriveRecord(
             id: id,
             name: "我的云盘",
             siteURL: URL(string: "https://drive.example.com")!,
-            remoteRootURI: rootURI,
+            remoteRootURI: remoteRoot,
             rootFileID: rootID,
             userID: "u1",
             clientID: UUID(uuidString: "11111111-2222-3333-4444-555555555555")!,
@@ -41,8 +41,11 @@ enum DBFixtures {
         )
     }
 
-    static func root(driveID: String = driveID) -> ItemRecord {
-        ItemRecord(driveID: driveID, id: rootID, parentID: nil, name: "", isFolder: true, uri: rootURI, createdAt: epoch, updatedAt: epoch)
+    static func root(driveID: String = driveID, remoteRoot: CloudreveURI = rootURI) -> ItemRecord {
+        ItemRecord(
+            driveID: driveID, id: rootID, parentID: nil, name: remoteRoot.lastPathComponent, isFolder: true, uri: remoteRoot,
+            createdAt: epoch, updatedAt: epoch
+        )
     }
 
     static func item(
@@ -55,12 +58,12 @@ enum DBFixtures {
         )
     }
 
-    /// 内存库 + 一个云盘及其根目录。
-    static func database(drives: [String] = [driveID]) throws -> any DatabaseWriter {
+    /// 内存库 + 云盘及其根目录（挂载根默认为 `/`）。
+    static func database(drives: [String] = [driveID], remoteRoot: CloudreveURI = rootURI) throws -> any DatabaseWriter {
         let db = try SyncDatabase.openInMemory()
         let store = DriveStore(db: db)
         for id in drives {
-            try store.insert(drive(id: id), rootItem: root(driveID: id))
+            try store.insert(drive(id: id, remoteRoot: remoteRoot), rootItem: root(driveID: id, remoteRoot: remoteRoot))
         }
         return db
     }

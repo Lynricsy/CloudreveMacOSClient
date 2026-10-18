@@ -50,6 +50,25 @@ public struct ChangeLog: Sendable {
         }
     }
 
+    /// 在同一读事务快照内校验 anchor 并取出 `seq > afterSeq` 的变更：anchor 早于已裁剪的日志或晚于最新序号时返回 nil。
+    /// 校验与读取分开时，两者之间的裁剪会让被裁掉的变更（尤其删除）静默漏报。
+    public func retainedChanges(driveID: String, afterSeq: Int64, limit: Int) throws -> [ChangeLogRecord]? {
+        try db.read { db in
+            let bounds = try Row.fetchOne(
+                db, sql: "SELECT MIN(seq) AS oldest, MAX(seq) AS latest FROM change_log WHERE drive_id = ?", arguments: [driveID]
+            )
+            let oldest: Int64? = bounds?["oldest"]
+            let latest: Int64 = bounds?["latest"] ?? 0
+            if let oldest, afterSeq < oldest - 1 { return nil }
+            if afterSeq > latest { return nil }
+            return try ChangeLogRecord.fetchAll(
+                db,
+                sql: "SELECT * FROM change_log WHERE drive_id = ? AND seq > ? ORDER BY seq LIMIT ?",
+                arguments: [driveID, afterSeq, limit]
+            )
+        }
+    }
+
     /// 仅保留该云盘最近 `keepLast` 条。
     public func prune(driveID: String, keepLast: Int = Self.defaultKeepLast) throws {
         try db.write { db in

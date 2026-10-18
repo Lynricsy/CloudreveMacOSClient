@@ -11,7 +11,7 @@ public struct UploadSessionRecord: SyncRecord, Equatable {
     public var policyType: String
     /// `UploadSession` 的 JSON。
     public var sessionJSON: String
-    /// `chunksDone`（`[Int: String?]`）的 JSON。
+    /// 续传状态 JSON：已完成分片、分片摘要、覆盖方式、收尾阶段（旧版本为 `[Int: String?]`，读取时兼容）。
     public var chunksJSON: String
     public var createdAt: Date
 

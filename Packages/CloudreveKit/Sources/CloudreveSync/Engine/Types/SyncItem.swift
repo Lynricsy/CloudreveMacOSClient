@@ -1,4 +1,9 @@
 import CloudreveAPI
+#if canImport(CryptoKit)
+import CryptoKit
+#else
+import Crypto
+#endif
 import Foundation
 
 /// 引擎对外暴露的条目（扩展层映射为 NSFileProviderItem）。
@@ -31,10 +36,12 @@ public struct SyncItem: Sendable, Equatable {
     }
 
     /// 内容版本 = entity id；元数据版本覆盖名称、父目录、修改时间与大小。
+    /// SDK 限制每个分量 ≤128 字节，长文件名直接拼接会超限，因此元数据分量取拼接串 SHA-256 的十六进制（64 字节）。
     public var version: ItemVersion {
         let millis = Int64(updatedAt.timeIntervalSince1970 * 1000)
         let separator = "\u{1F}"
-        let metadata = [name, parentID ?? "", String(millis), String(size)].joined(separator: separator)
+        let joined = [name, parentID ?? "", String(millis), String(size)].joined(separator: separator)
+        let metadata = SHA256.hash(data: Data(joined.utf8)).map { String(format: "%02x", $0) }.joined()
         return ItemVersion(content: entityID, metadata: metadata)
     }
 }

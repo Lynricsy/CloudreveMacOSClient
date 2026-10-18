@@ -80,12 +80,12 @@ public struct CloudreveClient: Sendable {
         do {
             envelope = try CloudreveDate.makeDecoder().decode(APIEnvelope<T>.self, from: response.body)
         } catch {
-            throw CloudreveAPIError.decoding("\(path)：\(error)")
+            throw CloudreveAPIError.decoding("\(Self.redacted(path: path))：\(error)")
         }
         if envelope.code == 0 {
             if let data = envelope.data { return data }
             if let empty = EmptyData() as? T { return empty }
-            throw CloudreveAPIError.decoding("\(path)：缺少 data")
+            throw CloudreveAPIError.decoding("\(Self.redacted(path: path))：缺少 data")
         }
         if CloudreveAPIError.credentialCodes.contains(envelope.code), authenticated, let tokens, let token {
             guard !retried else { throw CloudreveAPIError.credentialInvalid }
@@ -96,6 +96,14 @@ public struct CloudreveClient: Sendable {
         throw CloudreveAPIError.server(
             code: envelope.code, message: envelope.msg ?? envelope.error ?? "", correlationID: envelope.correlationID
         )
+    }
+
+    /// 用于错误文本的路径：上传回调 `/callback/<策略>/<会话>/<密钥>` 的密钥段替换为 `<redacted>`。
+    /// 密钥即回调凭据，错误会进入日志与传输记录，不得出现。
+    static func redacted(path: String) -> String {
+        let segments = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard segments.count > 4, segments[1] == "callback" else { return path }
+        return (segments[0...3] + ["<redacted>"]).joined(separator: "/")
     }
 
     func makeRequest(_ method: String, _ url: URL, body: RequestBody, headers: [String: String]) -> HTTPRequest {

@@ -41,7 +41,7 @@ final class AddDriveViewModel {
         }
     }
 
-    /// 取消进行中的授权（关闭浏览器会话），回到地址输入。
+    /// 取消进行中的授权（关闭浏览器会话）或设置；回到地址输入。窗口关闭时也会调用。
     func cancel() {
         flowTask?.cancel()
     }
@@ -96,24 +96,27 @@ final class AddDriveViewModel {
         return "\(OAuthConstants.reauthorizePrefix)\(reauthorizeDriveID):\(UUID().uuidString)"
     }
 
-    /// 新云盘：凭证入钥匙串 → 校验账号与挂载目录 → 写库并注册域。任一步失败都删除钥匙串条目，不留孤立凭证。
+    /// 新云盘：用隔离凭证校验账号与挂载目录 → 凭证入钥匙串 → 写库并注册域。
+    /// 校验阶段不写钥匙串；入库或注册失败时删除钥匙串条目，不留孤立凭证。
     private func addNewDrive(site: URL, callback: OAuthCallback, credentials: Credentials) async throws -> String {
         let driveID = UUID().uuidString
         let clientID = UUID()
         let rootURI = try Self.mountURI(callback.path)
+        let isolated = Self.makeIsolatedClient(driveID: driveID, site: site, clientID: clientID, credentials: credentials)
+        let user = try await isolated.client.me()
+        let root = try await isolated.client.folderInfo(uri: rootURI)
+        guard root.isFolder else { throw AddDriveError.notAFolder }
+        let capacity = try await isolated.client.capacity()
+        let setup = DriveSetup(
+            driveID: driveID, clientID: clientID, site: site, rootURI: rootURI, root: root,
+            name: callback.name ?? siteTitle ?? site.host() ?? "Cloudreve",
+            userID: callback.userID.isEmpty ? user.id : callback.userID, user: user, siteTitle: siteTitle, capacity: capacity
+        )
+        // 窗口已关闭（任务取消）则不再提交任何共享状态。
+        try Task.checkCancellation()
         let keychain = KeychainCredentialStore()
-        try keychain.save(credentials, driveID: driveID)
+        try keychain.save(isolated.store.load(driveID: driveID) ?? credentials, driveID: driveID)
         do {
-            let client = DriveRuntime.makeClient(driveID: driveID, site: site, clientID: clientID)
-            let user = try await client.me()
-            let root = try await client.folderInfo(uri: rootURI)
-            guard root.isFolder else { throw AddDriveError.notAFolder }
-            let capacity = try await client.capacity()
-            let setup = DriveSetup(
-                driveID: driveID, clientID: clientID, site: site, rootURI: rootURI, root: root,
-                name: callback.name ?? siteTitle ?? site.host() ?? "Cloudreve",
-                userID: callback.userID.isEmpty ? user.id : callback.userID, user: user, siteTitle: siteTitle, capacity: capacity
-            )
             try await driveManager.addDrive(setup)
         } catch {
             try? keychain.delete(driveID: driveID)
@@ -123,24 +126,34 @@ final class AddDriveViewModel {
         return driveID
     }
 
-    /// 重新登录：替换凭证并确认仍是同一账号；失败时恢复原凭证。
+    /// 重新登录：先用隔离凭证确认仍是同一账号，通过后才替换共享钥匙串中的凭证。
+    /// 扩展与 App 其余部分始终读共享钥匙串，校验期间继续使用原凭证，不会以其他账号的身份发出请求。
     private func reauthorize(driveID: String, callback: OAuthCallback, credentials: Credentials) async throws {
         guard let drive = try driveManager.driveStore.get(id: driveID) else { throw AddDriveError.driveMissing }
-        let keychain = KeychainCredentialStore()
-        let previous = try? keychain.load(driveID: driveID)
-        try keychain.save(credentials, driveID: driveID)
-        do {
-            let user = try await DriveRuntime.makeClient(drive: drive).me()
-            guard drive.userID == user.id || drive.userID == callback.userID else { throw AddDriveError.accountMismatch }
-        } catch {
-            if let previous {
-                try? keychain.save(previous, driveID: driveID)
-            } else {
-                try? keychain.delete(driveID: driveID)
-            }
-            throw error
-        }
+        let isolated = Self.makeIsolatedClient(
+            driveID: driveID, site: drive.siteURL, clientID: drive.clientID, credentials: credentials
+        )
+        let user = try await isolated.client.me()
+        guard drive.userID == user.id || drive.userID == callback.userID else { throw AddDriveError.accountMismatch }
+        // 提交段：以下到写入钥匙串之间没有挂起点，在主 actor 上与「移除云盘」互斥。
+        // `/me` 期间云盘可能已被移除（库行与钥匙串已删），此时写入会复活已清除的凭证，必须放弃。
+        try Task.checkCancellation()
+        guard try driveManager.driveStore.get(id: driveID) != nil else { throw AddDriveError.driveMissing }
+        // 校验期间可能刷新过 token，发布隔离存储里的最新凭证。
+        try KeychainCredentialStore().save(isolated.store.load(driveID: driveID) ?? credentials, driveID: driveID)
         try await driveManager.completeReauthorization(driveID: driveID)
+    }
+
+    /// 只持有本次授权凭证的客户端（内存凭证存储），与共享钥匙串隔离。
+    private static func makeIsolatedClient(
+        driveID: String, site: URL, clientID: UUID, credentials: Credentials
+    ) -> (client: CloudreveClient, store: InMemoryCredentialStore) {
+        let store = InMemoryCredentialStore([driveID: credentials])
+        let transport = DriveRuntime.transport
+        let tokens = TokenManager(driveID: driveID, store: store) { refreshToken in
+            try await CloudreveClient.refresh(site: site, transport: transport, refreshToken: refreshToken)
+        }
+        return (CloudreveClient(site: site, transport: transport, tokens: tokens, clientID: clientID), store)
     }
 
     /// 补全 scheme（默认 https）、去掉末尾 `/`，只接受带主机名的 http(s) 地址。

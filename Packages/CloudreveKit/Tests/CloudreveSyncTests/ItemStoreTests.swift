@@ -86,7 +86,7 @@ import Testing
         #expect(try store.descendants(driveID: driveID, uriPrefix: .my("/")).count == 16)
     }
 
-    @Test func reprefixRewritesDescendantsOnly() throws {
+    @Test func upsertOfMovedFolderRewritesDescendantsOnly() throws {
         let db = try DBFixtures.database()
         let store = ItemStore(db: db)
         try store.upsert([
@@ -96,12 +96,35 @@ import Testing
             DBFixtures.item("a3", path: "/a/中 文/y.txt", parent: "a2"),
             DBFixtures.item("ab1", path: "/ab.txt")
         ])
-        try store.reprefixURIs(driveID: driveID, oldPrefix: .my("/a"), newPrefix: .my("/b/新"))
-        #expect(try store.get(driveID: driveID, id: "a")?.uri == .my("/a"))
+        let before = try ChangeLog(db: db).latestSeq(driveID: driveID)
+        #expect(try store.upsert([DBFixtures.item("a", path: "/b/新", folder: true)]) == ["a"])
+        #expect(try store.get(driveID: driveID, id: "a")?.uri == .my("/b/新"))
         #expect(try store.get(driveID: driveID, id: "a1")?.uri == .my("/b/新/x.txt"))
         #expect(try store.get(driveID: driveID, id: "a3")?.uri == .my("/b/新/中 文/y.txt"))
         #expect(try store.get(driveID: driveID, id: "ab1")?.uri == .my("/ab.txt"))
         #expect(try store.getByURI(driveID: driveID, uri: .my("/b/新/中 文"))?.id == "a2")
+        // 只有目录自身的 update，后代不产生日志
+        #expect(try ChangeLog(db: db).changes(driveID: driveID, afterSeq: before, limit: 10).map(\.itemID) == ["a"])
+    }
+
+    /// 目录迁到自己原来的祖先位置（/p/a → /p）：新位置下的陈旧行被清理，同名嵌套后代经临时前缀迁移不撞唯一索引。
+    @Test func upsertOfFolderMovedOntoAncestorPath() throws {
+        let db = try DBFixtures.database()
+        let store = ItemStore(db: db)
+        try store.upsert([
+            DBFixtures.item("p", path: "/p", folder: true),
+            DBFixtures.item("sib", path: "/p/sib.txt", parent: "p"),
+            DBFixtures.item("a", path: "/p/a", parent: "p", folder: true),
+            DBFixtures.item("aa", path: "/p/a/a", parent: "a", folder: true),
+            DBFixtures.item("y", path: "/p/a/a/y", parent: "aa"),
+            DBFixtures.item("y2", path: "/p/a/y", parent: "a")
+        ])
+        try store.upsert([DBFixtures.item("a", path: "/p", folder: true)])
+        #expect(try store.get(driveID: driveID, id: "p") == nil)
+        #expect(try store.get(driveID: driveID, id: "sib") == nil)
+        #expect(try store.get(driveID: driveID, id: "aa")?.uri == .my("/p/a"))
+        #expect(try store.get(driveID: driveID, id: "y")?.uri == .my("/p/a/y"))
+        #expect(try store.get(driveID: driveID, id: "y2")?.uri == .my("/p/y"))
     }
 
     @Test func pageExcludesRootAndPagesByRowID() throws {

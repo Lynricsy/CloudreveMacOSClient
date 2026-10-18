@@ -33,6 +33,8 @@ final class DriveManager {
     @ObservationIgnored let transferStore: TransferStore
     @ObservationIgnored private let remoteEvents: RemoteEventQueue
     @ObservationIgnored private var pollingTask: Task<Void, Never>?
+    /// 当前可见、需要每秒刷新的界面；全部关闭才停止轮询。
+    @ObservationIgnored private var pollingConsumers: Set<PollingConsumer> = []
     @ObservationIgnored private var samples: [String: TransferSample] = [:]
     @ObservationIgnored private var refreshingCapacity: Set<String> = []
     @ObservationIgnored private let doorbell = RemoteChangeDoorbell()
@@ -88,10 +90,20 @@ final class DriveManager {
         }
     }
 
-    /// 弹窗出现时开始每秒刷新，并按需刷新过期的容量。
+    /// 弹窗出现时开始每秒刷新，并按需刷新过期的容量与域启用状态。
     func startPopupPolling() {
         refreshStaleCapacities()
         Task { await refreshEnablement() }
+        startPolling(for: .popup)
+    }
+
+    func stopPopupPolling() {
+        stopPolling(for: .popup)
+    }
+
+    /// 界面可见期间每秒重读共享库（扩展与远端事件监听会改写云盘状态和传输）；多个界面共用同一轮询任务。
+    func startPolling(for consumer: PollingConsumer) {
+        pollingConsumers.insert(consumer)
         guard pollingTask == nil else { return }
         pollingTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -102,7 +114,10 @@ final class DriveManager {
         }
     }
 
-    func stopPopupPolling() {
+    /// 该界面不再可见；没有其他可见界面时停止轮询。
+    func stopPolling(for consumer: PollingConsumer) {
+        pollingConsumers.remove(consumer)
+        guard pollingConsumers.isEmpty else { return }
         pollingTask?.cancel()
         pollingTask = nil
     }
@@ -261,4 +276,10 @@ final class DriveManager {
         Log.shared.error("DriveManager", message)
         actionError = message
     }
+}
+
+/// 需要持续刷新共享库的界面。
+enum PollingConsumer: Hashable, Sendable {
+    case popup
+    case settings
 }

@@ -9,18 +9,18 @@ public struct OneDriveStrategy: ChunkStrategy {
         self.fileSize = fileSize
     }
 
-    public func upload(chunk: UploadChunk, data: Data, session: UploadSession, client: CloudreveClient) async throws -> String? {
+    public func upload(chunk: UploadChunk, body: HTTPBody, session: UploadSession, client: CloudreveClient) async throws -> String? {
         let url = try StorageHTTP.uploadURL(session, index: 0)
-        let end = chunk.offset + Int64(data.count) - 1
+        let end = chunk.offset + chunk.length - 1
         let headers = [
             "Content-Type": StorageHTTP.octetStream,
             "Content-Range": "bytes \(chunk.offset)-\(end)/\(fileSize)"
         ]
-        _ = try await StorageHTTP.send(HTTPRequest(method: "PUT", url: url, headers: headers, body: .data(data)), client: client)
+        _ = try await StorageHTTP.send(HTTPRequest(method: "PUT", url: url, headers: headers, body: body), client: client)
         return nil
     }
 
-    public func complete(session: UploadSession, etags: [Int: String], client: CloudreveClient) async throws {
+    public func commit(session: UploadSession, client: CloudreveClient) async throws {
         try await client.completeOneDriveCallback(sessionID: session.sessionID, secret: session.callbackSecret)
     }
 }

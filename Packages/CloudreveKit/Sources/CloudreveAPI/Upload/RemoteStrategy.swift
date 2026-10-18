@@ -4,14 +4,14 @@ import Foundation
 public struct RemoteStrategy: ChunkStrategy {
     public init() {}
 
-    public func upload(chunk: UploadChunk, data: Data, session: UploadSession, client: CloudreveClient) async throws -> String? {
+    public func upload(chunk: UploadChunk, body: HTTPBody, session: UploadSession, client: CloudreveClient) async throws -> String? {
         let base = session.uploadURLs?.first ?? ""
         let separator = base.contains("?") ? "&" : "?"
         let url = try StorageHTTP.url(base + separator + "chunk=\(chunk.index)")
         var headers = ["Content-Type": StorageHTTP.octetStream]
         if let credential = session.credential { headers["Authorization"] = credential }
         let response = try await StorageHTTP.send(
-            HTTPRequest(method: "POST", url: url, headers: headers, body: .data(data)), client: client
+            HTTPRequest(method: "POST", url: url, headers: headers, body: body), client: client
         )
         // 从机返回 `{code, msg}`，code != 0 为错误；无法解析的响应体视为成功。
         if let reply = try? JSONDecoder().decode(NodeReply.self, from: response.body), reply.code != 0 {
@@ -19,8 +19,6 @@ public struct RemoteStrategy: ChunkStrategy {
         }
         return nil
     }
-
-    public func complete(session: UploadSession, etags: [Int: String], client: CloudreveClient) async throws {}
 }
 
 /// 从机响应。

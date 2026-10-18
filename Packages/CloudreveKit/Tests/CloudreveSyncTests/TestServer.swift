@@ -121,9 +121,11 @@ final class TestServer: Sendable {
 
     // MARK: - 行为注入
 
-    /// 下一个匹配请求返回业务错误码。
-    func failNext(_ method: String, _ path: String, code: Int) {
-        overrideNext(method, path, with: .envelope(code: code, msg: "注入错误 \(code)"))
+    /// 下一个匹配请求返回业务错误码；`uri` 非 nil 时只匹配查询参数 `uri` 为该路径（`/a/b` 形式）的请求。
+    func failNext(_ method: String, _ path: String, code: Int, uri: String? = nil) {
+        let response = HTTPResponse.envelope(code: code, msg: "注入错误 \(code)")
+        let target = uri.map { CloudreveURI.my($0).description }
+        state.withLock { $0.overrides.append(ResponseOverride(method: method, path: path, uri: target, response: response)) }
     }
 
     /// 下一个匹配请求返回给定响应（路径规则见 `ResponseOverride`）。

@@ -9,7 +9,7 @@ import Testing
         let db = try SyncDatabase.openInMemory()
         try Migrations.migrator.migrate(db)
         let applied = try db.read { try Migrations.migrator.appliedMigrations($0) }
-        #expect(applied == ["v1", "v2"])
+        #expect(applied == ["v1", "v2", "v3"])
         let tables = try db.read { db in
             try ["drive", "item", "change_log", "transfer", "upload_session", "app_setting", "remote_event"]
                 .allSatisfy { try db.tableExists($0) }

@@ -4,10 +4,8 @@ import Foundation
 public struct LocalStrategy: ChunkStrategy {
     public init() {}
 
-    public func upload(chunk: UploadChunk, data: Data, session: UploadSession, client: CloudreveClient) async throws -> String? {
-        try await client.uploadChunk(sessionID: session.sessionID, index: chunk.index, data: data)
+    public func upload(chunk: UploadChunk, body: HTTPBody, session: UploadSession, client: CloudreveClient) async throws -> String? {
+        try await client.uploadChunk(sessionID: session.sessionID, index: chunk.index, body: body)
         return nil
     }
-
-    public func complete(session: UploadSession, etags: [Int: String], client: CloudreveClient) async throws {}
 }

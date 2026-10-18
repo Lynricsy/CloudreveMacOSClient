@@ -86,15 +86,16 @@ public struct ItemRecord: SyncRecord, Equatable {
 
 extension ItemRecord {
     /// 是否在同步可见字段上与 `other` 不同（name/parent_id/size/entity_id/updated_at/is_folder）。
-    /// 时间按毫秒比较，规避 Double 往返误差。
+    /// 时间按毫秒比较，规避 Double 往返误差；名称与 uri 按实际存储的字节比较（Swift `String ==` 按规范等价，
+    /// 会漏掉仅 Unicode 规范化不同的改名）。
     func differsInTrackedFields(from other: ItemRecord) -> Bool {
-        name != other.name || parentID != other.parentID || size != other.size || entityID != other.entityID
-            || isFolder != other.isFolder || Self.millis(updatedAt) != Self.millis(other.updatedAt)
+        !name.unicodeScalars.elementsEqual(other.name.unicodeScalars) || parentID != other.parentID || size != other.size
+            || entityID != other.entityID || isFolder != other.isFolder || Self.millis(updatedAt) != Self.millis(other.updatedAt)
     }
 
     /// 是否需要写回数据库（含 uri、created_at 等非追踪列）。
     func differsInStoredColumns(from other: ItemRecord) -> Bool {
-        differsInTrackedFields(from: other) || uri != other.uri
+        differsInTrackedFields(from: other) || uri.description != other.uri.description
             || Self.millis(createdAt) != Self.millis(other.createdAt)
             || enumeratedAt.map(Self.millis) != other.enumeratedAt.map(Self.millis)
     }
