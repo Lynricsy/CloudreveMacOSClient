@@ -154,16 +154,25 @@ extension SyncEngine {
             throw SyncError.cannotSynchronize("下载长度不符")
         }
         if let digest, ContentDigest.hex(hasher.finalize()) != digest {
-            throw SyncError.cannotSynchronize("下载内容与服务端 SHA-256 不符")
+            throw SyncError.integrityCheckFailed("下载内容与服务端 SHA-256 不符")
         }
         return written
     }
 
-    /// 服务端记录的实体大小与 SHA-256；未指定实体或文件已不含该实体时返回 nil。
-    /// 摘要格式无效时按未公布处理：只是少一层校验，不应让下载失败。
+    /// 服务端记录的实体大小与 SHA-256；未指定实体、文件已不含该实体或查询暂时失败时返回 nil。
+    ///
+    /// 摘要只是额外一层校验，取不到不应让本可完成的操作失败：摘要格式无效按未公布处理；查询遇到暂时性故障
+    /// （传输错误、408/429/5xx）时退回只校验长度（下载）或逐字节比较（认领）。条目不存在、凭证失效与取消照常抛出，
+    /// 由调用方按原有语义处理。
     func publishedEntity(fileID: String, entity: String?) async throws -> FileEntity? {
         guard let entity else { return nil }
-        let info = try await client.fileInfo(id: fileID, extended: true)
+        let info: FileResponse
+        do {
+            info = try await client.fileInfo(id: fileID, extended: true)
+        } catch where SyncErrorMapper.map(error) as? SyncError == .serverUnreachable && !Task.isCancelled {
+            Log.shared.info("engine", "查询实体信息暂时失败，本次不校验摘要：\(error)")
+            return nil
+        }
         guard var found = info.extendedInfo?.entities.first(where: { $0.id == entity }) else { return nil }
         found.sha256 = found.sha256.flatMap(ContentDigest.normalizedSHA256)
         return found

@@ -1,10 +1,17 @@
 import CloudreveAPI
+#if canImport(CryptoKit)
+import CryptoKit
+#else
+import Crypto
+#endif
 import Foundation
 import Testing
 @testable import CloudreveSync
 
 // 按服务端公布的实体 SHA-256（OpenCloudreve）校验内容。
 extension SyncEngineTests {
+    private static let digestMismatch = SyncError.integrityCheckFailed("下载内容与服务端 SHA-256 不符")
+
     /// 服务端公布了 SHA-256（OpenCloudreve）：长度相同但内容不符时下载失败并删除临时文件；相符时正常交付。
     @Test func downloadVerifiesPublishedSHA256() async throws {
         let env = try await EngineHarness.make()
@@ -14,7 +21,7 @@ extension SyncEngineTests {
 
         env.server.overrideNext("GET", ServerState.downloadPrefix, with: HTTPResponse(status: 200, body: Data("hello WORLD".utf8)))
         let corrupted = EngineHarness.tempURL()
-        await #expect(throws: SyncError.cannotSynchronize("下载内容与服务端 SHA-256 不符")) {
+        await #expect(throws: Self.digestMismatch) {
             try await env.engine.download(id: "f", version: nil, to: corrupted, progress: ignoreProgress)
         }
         #expect(!FileManager.default.fileExists(atPath: corrupted.path))
@@ -25,20 +32,63 @@ extension SyncEngineTests {
         #expect(try Data(contentsOf: destination) == Data("hello world".utf8))
     }
 
-    /// 实体信息查询很慢、正文很快：必须等拿到期望摘要后才开始下载正文。
+    /// 服务端给出的摘要按规范化后使用：大写照常校验，格式无效视为未公布（只校验长度），都不得拒绝正确内容。
+    @Test func downloadNormalizesPublishedDigest() async throws {
+        let env = try await EngineHarness.make()
+        let content = Data("hello world".utf8)
+        env.server.addFile("/f.bin", content: content, id: "f")
+        try await env.enumerateAll(env.rootID)
+        let entity = try #require(try env.record("f")).entityID
+        let upper = ContentDigest.hex(SHA256.hash(data: content)).uppercased()
+
+        env.server.publishHash(entity: entity, sha256: upper)
+        let accepted = EngineHarness.tempURL()
+        _ = try await env.engine.download(id: "f", version: nil, to: accepted, progress: ignoreProgress)
+        #expect(try Data(contentsOf: accepted) == content)
+        env.server.overrideNext("GET", ServerState.downloadPrefix, with: HTTPResponse(status: 200, body: Data("hello WORLD".utf8)))
+        await #expect(throws: Self.digestMismatch) {
+            try await env.engine.download(id: "f", version: nil, to: EngineHarness.tempURL(), progress: ignoreProgress)
+        }
+
+        env.server.publishHash(entity: entity, sha256: "not-a-digest")
+        let lengthOnly = EngineHarness.tempURL()
+        _ = try await env.engine.download(id: "f", version: nil, to: lengthOnly, progress: ignoreProgress)
+        #expect(try Data(contentsOf: lengthOnly) == content)
+    }
+
+    /// 实体信息查询暂时失败（5xx 等）不得拖垮本可完成的下载：退回只校验长度。
+    @Test func downloadFallsBackToLengthCheckWhenEntityInfoUnavailable() async throws {
+        let env = try await EngineHarness.make()
+        env.server.addFile("/f.bin", content: Data("hello world".utf8), id: "f")
+        try await env.enumerateAll(env.rootID)
+        env.server.publishHash(entity: try #require(try env.record("f")).entityID)
+
+        env.server.overrideNext("GET", "/api/v4/file/info", with: HTTPResponse(status: 503, body: Data("busy".utf8)))
+        let destination = EngineHarness.tempURL()
+        _ = try await env.engine.download(id: "f", version: nil, to: destination, progress: ignoreProgress)
+        #expect(try Data(contentsOf: destination) == Data("hello world".utf8))
+    }
+
+    /// 实体信息查询很慢：与取下载地址并发，但拿到期望摘要后才开始请求正文。
     /// 传输层的分块流不限缓冲，提前开始会让正文在查询期间全部堆在内存里。
     @Test func downloadStartsBodyOnlyAfterEntityInfoArrives() async throws {
         let env = try await EngineHarness.make()
         env.server.addFile("/f.bin", content: Data("hello world".utf8), id: "f")
         try await env.enumerateAll(env.rootID)
         env.server.publishHash(entity: try #require(try env.record("f")).entityID)
-        env.server.setLatency("GET /api/v4/file/info", .milliseconds(300))
+        let gate = env.server.hold("GET /api/v4/file/info")
 
         let destination = EngineHarness.tempURL()
-        _ = try await env.engine.download(id: "f", version: nil, to: destination, progress: ignoreProgress)
+        let task = Task { try await env.engine.download(id: "f", version: nil, to: destination, progress: ignoreProgress) }
+        try await env.server.waitUntilCompleted("POST /api/v4/file/url")
+        // 下载地址已取得、实体信息仍挂起：给错误实现留出发起正文请求的机会
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await env.mock.requests("GET", pathPrefix: "/api/v4/file/info").count == 1)
+        #expect(await env.mock.requests("GET", pathPrefix: ServerState.downloadPrefix).isEmpty)
+
+        gate.open()
+        _ = try await task.value
         #expect(try Data(contentsOf: destination) == Data("hello world".utf8))
-        let order = env.server.completedEndpoints().filter { $0.contains("file/info") || $0.contains("file/url") || $0.contains("/dl/") }
-        #expect(order == ["POST /api/v4/file/url", "GET /api/v4/file/info", "GET \(ServerState.downloadPrefix)"])
     }
 
     /// 历史版本：镜像只知道当前版本的大小，按服务端记录的该实体大小与 SHA-256 校验。
@@ -57,7 +107,7 @@ extension SyncEngineTests {
 
         env.server.publishHash(entity: old)
         env.server.overrideNext("GET", ServerState.downloadPrefix, with: HTTPResponse(status: 200, body: Data("v2".utf8)))
-        await #expect(throws: SyncError.cannotSynchronize("下载内容与服务端 SHA-256 不符")) {
+        await #expect(throws: Self.digestMismatch) {
             try await env.engine.download(id: "f", version: old, to: EngineHarness.tempURL(), progress: ignoreProgress)
         }
     }

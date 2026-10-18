@@ -112,6 +112,10 @@ enum FileProviderBridge {
         case .directoryNotEmpty: return .directoryNotEmpty
         case .deletionRejected: return .deletionRejected
         case .cannotSynchronize: return .cannotSynchronize
+        // fetchContents 的错误中只有未认证、服务器不可达会让系统退避到下次通知；其他错误一律视为暂时性并立即重下
+        // （NSFileProviderReplicatedExtension.h）。摘要不符多半是服务端存储损坏，重下只会反复下载整个文件。
+        // 服务端修复或产生新版本时会有远端事件，App 随即通知系统重试
+        case .integrityCheckFailed: return .serverUnreachable
         }
     }
 

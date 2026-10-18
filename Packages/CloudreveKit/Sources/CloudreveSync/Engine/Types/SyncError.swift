@@ -16,6 +16,8 @@ public enum SyncError: Error, Sendable, Equatable {
     /// 供扩展构造拒绝删除错误。
     case deletionRejected(latest: SyncItem?)
     case cannotSynchronize(String)
+    /// 下载内容与服务端公布的摘要不符。服务端存储已损坏时重试也无法恢复，扩展需让系统退避而不是立即重下。
+    case integrityCheckFailed(String)
 }
 
 extension SyncError: LocalizedError {
@@ -31,7 +33,7 @@ extension SyncError: LocalizedError {
         case .excludedFromSync: return "文件被忽略规则排除"
         case .directoryNotEmpty: return "目录不为空"
         case .deletionRejected: return "文件已在服务器上更改，未删除"
-        case .cannotSynchronize(let message): return message
+        case .cannotSynchronize(let message), .integrityCheckFailed(let message): return message
         }
     }
 }

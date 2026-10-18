@@ -21,13 +21,14 @@ public enum ContentDigest {
         return lower
     }
 
-    /// 流式读取整个文件计算 SHA-256，内存占用与文件大小无关。
+    /// 流式读取整个文件计算 SHA-256，内存占用与文件大小无关。每读一块检查一次任务取消，取消时抛 `CancellationError`。
     public static func sha256(of fileURL: URL) throws -> String {
         let input = try FileHandle(forReadingFrom: fileURL)
         defer { try? input.close() }
         var hasher = SHA256()
         var done = false
         while !done {
+            try Task.checkCancellation()
             try ChunkStaging.withBufferPool {
                 guard let data = try input.read(upToCount: ChunkStaging.bufferSize), !data.isEmpty else {
                     done = true

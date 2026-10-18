@@ -16,6 +16,8 @@ final class TestServer: Sendable {
     private let state: Mutex<ServerState>
     /// 「方法 路径」→ 响应前的延迟（模拟慢请求，用于并发测试）。
     private let latencies = Mutex<[String: Duration]>([:])
+    /// 「方法 路径」→ 挂起该端点请求的闸门（确定性地制造慢请求）。
+    private let gates = Mutex<[String: RequestGate]>([:])
     /// 已应答请求的「方法 路径」（路由注册时的写法），按应答完成的先后排列。
     private let completions = Mutex<[String]>([])
 
@@ -51,6 +53,7 @@ final class TestServer: Sendable {
             let parts = endpoint.split(separator: " ", maxSplits: 1).map(String.init)
             await mock.route(parts[0], parts[1]) { [self] request in
                 if let delay = latencies.withLock({ $0[endpoint] }) { try await Task.sleep(for: delay) }
+                if let gate = gates.withLock({ $0[endpoint] }) { await gate.wait() }
                 let response = respond(request, handler)
                 completions.withLock { $0.append(endpoint) }
                 return response
@@ -78,9 +81,13 @@ final class TestServer: Sendable {
         return .envelope(dataJSON: json)
     }
 
-    /// 已应答的端点，按完成先后排列（用于断言请求之间的先后依赖）。
-    func completedEndpoints() -> [String] {
-        completions.withLock { $0 }
+    /// 等待该端点（路由注册时的写法）至少应答过一次；超时视为测试失败。
+    func waitUntilCompleted(_ endpoint: String, timeout: Duration = .seconds(5)) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while !completions.withLock({ $0.contains(endpoint) }) {
+            guard ContinuousClock.now < deadline else { throw ServerFailure(code: -1) }
+            try await Task.sleep(for: .milliseconds(5))
+        }
     }
 
     // MARK: - 测试操作（模拟网页端改动）
@@ -174,5 +181,42 @@ final class TestServer: Sendable {
     /// 之后对该端点（如 `"GET /api/v4/file/info"`）的每个请求都先等待 `delay` 再应答。
     func setLatency(_ endpoint: String, _ delay: Duration) {
         latencies.withLock { $0[endpoint] = delay }
+    }
+
+    /// 之后对该端点的请求都挂起，直到调用返回闸门的 `open()`。
+    func hold(_ endpoint: String) -> RequestGate {
+        let gate = RequestGate()
+        gates.withLock { $0[endpoint] = gate }
+        return gate
+    }
+}
+
+/// 挂起请求直到放行；放行后到达的请求不再等待。
+final class RequestGate: Sendable {
+    private struct State {
+        var isOpen = false
+        var waiters: [CheckedContinuation<Void, Never>] = []
+    }
+
+    private let state = Mutex(State())
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            let proceed = state.withLock { state in
+                if state.isOpen { return true }
+                state.waiters.append(continuation)
+                return false
+            }
+            if proceed { continuation.resume() }
+        }
+    }
+
+    func open() {
+        let waiters = state.withLock { state in
+            state.isOpen = true
+            defer { state.waiters = [] }
+            return state.waiters
+        }
+        waiters.forEach { $0.resume() }
     }
 }

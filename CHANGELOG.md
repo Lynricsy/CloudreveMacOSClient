@@ -6,7 +6,7 @@
 
 ### 新增
 
-- 连接 [OpenCloudreve](https://github.com/Lynricsy/OpenCloudreve) 4.19.10 及以上时，下载按服务端算出的 SHA-256 校验内容：长度不变的损坏也能发现，不会交给 Finder。重新导入同名文件时直接比对摘要，不再下载服务端内容逐字节比较。官方 Cloudreve 上行为不变。
+- 连接 [OpenCloudreve](https://github.com/Lynricsy/OpenCloudreve) 4.19.10 及以上时，下载按服务端算出的 SHA-256 校验内容：长度不变的损坏也能发现，不会交给 Finder；摘要不符时系统退避到下次通知再重试，不会反复下载整个文件。查询摘要暂时失败时照常下载、只校验长度。重新导入同名文件时直接比对摘要，不再下载服务端内容逐字节比较。官方 Cloudreve 上行为不变。
 
 ### 修复
 
