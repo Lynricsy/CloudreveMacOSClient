@@ -1,4 +1,9 @@
 import CloudreveAPI
+#if canImport(CryptoKit)
+import CryptoKit
+#else
+import Crypto
+#endif
 import Foundation
 import Synchronization
 
@@ -87,6 +92,14 @@ final class TestServer: Sendable {
         state.withLock { state in
             guard let node = state.node(at: CloudreveURI.my(path).segments) else { preconditionFailure("不存在：\(path)") }
             return state.setContent(id: node.id, content)
+        }
+    }
+
+    /// 服务端公布 `entity` 的 SHA-256：默认为其真实内容的摘要，传 `sha256` 可模拟与存储内容不符的记录。
+    func publishHash(entity: String, sha256: String? = nil) {
+        state.withLock { state in
+            let actual = state.entityData(entity).map { ContentDigest.hex(SHA256.hash(data: $0)) }
+            state.publishedHashes[entity] = sha256 ?? actual
         }
     }
 

@@ -26,7 +26,7 @@ let package = Package(
             ]
         ),
         .testTarget(name: "CloudreveAPITests", dependencies: ["CloudreveAPI", linuxCrypto]),
-        .testTarget(name: "CloudreveSyncTests", dependencies: ["CloudreveSync", "CloudreveAPI"])
+        .testTarget(name: "CloudreveSyncTests", dependencies: ["CloudreveSync", "CloudreveAPI", linuxCrypto])
     ],
     swiftLanguageModes: [.v6]
 )

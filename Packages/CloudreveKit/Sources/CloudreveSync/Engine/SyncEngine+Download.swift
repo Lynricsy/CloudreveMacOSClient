@@ -1,4 +1,9 @@
 import CloudreveAPI
+#if canImport(CryptoKit)
+import CryptoKit
+#else
+import Crypto
+#endif
 import Foundation
 
 extension SyncEngine {
@@ -40,14 +45,14 @@ extension SyncEngine {
     ) async throws -> SyncItem {
         let written: Int64
         do {
-            written = try await fetchContent(record, entity: entity, to: destination, transfer: transfer, progress: progress)
+            // 镜像只知道当前版本的大小；其他版本由 fetchContent 按服务端记录的实体大小校验
+            let size = entity == record.entityID ? record.size : nil
+            written = try await fetchContent(
+                record, entity: entity, expectedSize: size, to: destination, transfer: transfer, progress: progress
+            )
         } catch where Self.isNotFound(error) {
             // 指定的历史版本不存在不代表条目被删除，不能报 noSuchItem（系统会据此删除本地条目）
             throw SyncError.cannotSynchronize("请求的版本已不存在")
-        }
-        // 只有镜像当前版本才知道期望长度
-        if entity == record.entityID, written != record.size {
-            throw SyncError.cannotSynchronize("下载长度不符")
         }
         var item = SyncItem(record: record)
         item.entityID = entity
@@ -85,8 +90,9 @@ extension SyncEngine {
         _ record: ItemRecord, to destination: URL, transfer: TransferProgress, progress: @escaping ProgressHandler
     ) async throws {
         let entity = Self.nonEmpty(record.entityID)
-        let written = try await fetchContent(record, entity: entity, to: destination, transfer: transfer, progress: progress)
-        guard written == record.size else { throw SyncError.cannotSynchronize("下载长度不符") }
+        _ = try await fetchContent(
+            record, entity: entity, expectedSize: record.size, to: destination, transfer: transfer, progress: progress
+        )
     }
 
     /// 缩略图地址；目录、混淆缩略图或服务端不支持该类型时返回 nil。
@@ -111,29 +117,54 @@ extension SyncEngine {
         return !CloudreveAPIError.credentialCodes.contains(code)
     }
 
-    /// 流式写入文件，返回写入字节数。空文件不访问网络。
+    /// 流式写入文件并校验，返回写入字节数。空文件不访问网络。
+    ///
+    /// 期望长度取 `expectedSize`（镜像中的当前版本大小），没有时取服务端记录的该实体大小；
+    /// 服务端公布了该实体的 SHA-256（OpenCloudreve）时边写边算并比对，没有公布时只校验长度。
     private func fetchContent(
-        _ record: ItemRecord, entity: String?, to destination: URL, transfer: TransferProgress,
+        _ record: ItemRecord, entity: String?, expectedSize: Int64?, to destination: URL, transfer: TransferProgress,
         progress: @escaping ProgressHandler
     ) async throws -> Int64 {
         guard FileManager.default.createFile(atPath: destination.path, contents: nil) else {
             throw SyncError.cannotSynchronize("无法创建临时文件")
         }
         if record.size == 0 && entity == nil { return 0 }
+        // 与取下载地址并发，不增加串行往返
+        async let published = publishedEntity(fileID: record.id, entity: entity)
         let url = try await client.downloadURL(uri: record.uri, entity: entity)
         let (head, chunks) = try await client.fetch(url: url)
         guard (200..<300).contains(head.status) else {
             throw CloudreveAPIError.http(status: head.status, body: try await CloudreveClient.collect(chunks))
         }
+        let known = try await published
+        let digest = known?.sha256
+        var hasher = SHA256()
         let handle = try FileHandle(forWritingTo: destination)
         defer { try? handle.close() }
         var written: Int64 = 0
         for try await chunk in chunks {
             try handle.write(contentsOf: chunk)
+            if digest != nil { hasher.update(data: chunk) }
             written += Int64(chunk.count)
             transfer.report(written)
             progress(written, record.size)
         }
+        if let size = expectedSize ?? known?.size, written != size {
+            throw SyncError.cannotSynchronize("下载长度不符")
+        }
+        if let digest, ContentDigest.hex(hasher.finalize()) != digest {
+            throw SyncError.cannotSynchronize("下载内容与服务端 SHA-256 不符")
+        }
         return written
+    }
+
+    /// 服务端记录的实体大小与 SHA-256；未指定实体或文件已不含该实体时返回 nil。
+    /// 摘要格式无效时按未公布处理：只是少一层校验，不应让下载失败。
+    func publishedEntity(fileID: String, entity: String?) async throws -> FileEntity? {
+        guard let entity else { return nil }
+        let info = try await client.fileInfo(id: fileID, extended: true)
+        guard var found = info.extendedInfo?.entities.first(where: { $0.id == entity }) else { return nil }
+        found.sha256 = found.sha256.flatMap(ContentDigest.normalizedSHA256)
+        return found
     }
 }

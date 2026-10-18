@@ -100,6 +100,33 @@ import Testing
         #expect(request.queryItems["uri"] == CloudreveURI.my("/dir/a+b c").description)
     }
 
+    /// 按服务端实际输出解析扩展信息：实体带对象字段时照常解析，`sha256` 只有 OpenCloudreve 已算出时才有，
+    /// 没有实体时服务端省略 `entities`。
+    @Test func fileInfoExtendedDecodesEntityHashes() async throws {
+        let mock = MockTransport()
+        let base = #"{"type":0,"id":"f","name":"a","created_at":"2024-01-01T00:00:00Z","updated_at":"2024-01-01T00:00:00Z","size":3"#
+        let entities = #","extended_info":{"storage_used":3,"storage_policy":{"id":"p","name":"本机","type":"local"},"entities":["#
+            + #"{"id":"e1","size":3,"type":0,"created_at":"2024-01-01T00:00:00Z","created_by":{"id":"u","nickname":"n"},"#
+            + #""storage_policy":{"id":"p","type":"local"},"sha256":"BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD"},"#
+            + #"{"id":"e0","size":2,"type":0,"created_at":"2024-01-01T00:00:00Z","encrypted_with":"aes-256-ctr"}]}}"#
+        await mock.route("GET", "/api/v4/file/info") { request in
+            .envelope(dataJSON: request.queryItems["id"] == "bare" ? base + #","extended_info":{"storage_used":0}}"# : base + entities)
+        }
+        let client = Fixtures.client(mock: mock, store: InMemoryCredentialStore([Fixtures.driveID: Fixtures.credentials()]))
+
+        let info = try await client.fileInfo(id: "f", extended: true)
+        #expect(await mock.requests.first?.queryItems["extended"] == "true")
+        let decoded = try #require(info.extendedInfo).entities
+        #expect(decoded == [
+            FileEntity(id: "e1", size: 3, sha256: "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD"),
+            FileEntity(id: "e0", size: 2)
+        ])
+        let normalized = ContentDigest.normalizedSHA256(decoded[0].sha256 ?? "")
+        #expect(normalized == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        #expect(ContentDigest.normalizedSHA256("xyz") == nil)
+        #expect(try await client.fileInfo(id: "bare", extended: true).extendedInfo?.entities == [])
+    }
+
     @Test func serverVersionComparison() throws {
         #expect(try #require(ServerVersion.parse("4.14.0-pro")).isSupported)
         #expect(try #require(ServerVersion.parse("4.12")).isSupported)

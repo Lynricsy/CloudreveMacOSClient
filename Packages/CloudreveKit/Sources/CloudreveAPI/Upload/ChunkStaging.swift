@@ -80,11 +80,11 @@ enum ChunkStaging {
                 remaining -= Int64(data.count)
             }
         }
-        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        return ContentDigest.hex(hasher.finalize())
     }
 
     /// 每轮缓冲及时释放（Darwin 上 Data 可能挂在自动释放池里；Linux 没有自动释放池）。
-    private static func withBufferPool(_ body: () throws -> Void) rethrows {
+    static func withBufferPool(_ body: () throws -> Void) rethrows {
         #if canImport(ObjectiveC)
         try autoreleasepool(invoking: body)
         #else

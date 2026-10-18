@@ -60,17 +60,26 @@ extension ServerState {
 
     func info(_ request: HTTPRequest) throws -> HTTPResponse {
         let query = request.queryItems
+        var response: FileResponse
         if let id = query["id"] {
             if let node = trashed[id] {
                 // 与真实服务端一致：回收站中的条目按 id 仍可查到，path 是回收站路径
-                var response = node.response
+                response = node.response
                 response.path = "cloudreve://trash/\(UUID().uuidString.lowercased())"
-                return try .envelope(encoding: response)
+            } else {
+                guard let node = node(id: id) else { throw ServerFailure(code: 40044) }
+                response = node.response
             }
-            guard let node = node(id: id) else { throw ServerFailure(code: 40044) }
-            return try .envelope(encoding: node.response)
+        } else {
+            response = try existing(query["uri"]).response
         }
-        return try .envelope(encoding: existing(query["uri"]).response)
+        if query["extended"] == "true" {
+            let owned = entityOwners.filter { $0.value == response.id }.keys.sorted()
+            response.extendedInfo = FileExtendedInfo(entities: owned.map {
+                FileEntity(id: $0, size: Int64(entities[$0]?.count ?? 0), sha256: publishedHashes[$0])
+            })
+        }
+        return try .envelope(encoding: response)
     }
 
     func fileURL(_ request: HTTPRequest) throws -> HTTPResponse {

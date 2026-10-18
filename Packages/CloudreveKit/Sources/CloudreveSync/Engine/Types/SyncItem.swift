@@ -41,7 +41,7 @@ public struct SyncItem: Sendable, Equatable {
         let millis = Int64(updatedAt.timeIntervalSince1970 * 1000)
         let separator = "\u{1F}"
         let joined = [name, parentID ?? "", String(millis), String(size)].joined(separator: separator)
-        let metadata = SHA256.hash(data: Data(joined.utf8)).map { String(format: "%02x", $0) }.joined()
+        let metadata = ContentDigest.hex(SHA256.hash(data: Data(joined.utf8)))
         return ItemVersion(content: entityID, metadata: metadata)
     }
 }

@@ -23,7 +23,7 @@ extension SyncEngine {
 
     /// 新建文件（`contents` 为 nil 表示空文件）。名称规则同 `createFolder`。
     ///
-    /// `mayAlreadyExist`（系统重新导入）命中服务端同名文件时：本地内容与服务端逐字节相同才认领服务端条目，
+    /// `mayAlreadyExist`（系统重新导入）命中服务端同名文件时：本地内容与服务端相同才认领服务端条目，
     /// 否则抛 `.filenameCollision(existing:)`，不得把服务端版本当成上传成功；没有本地内容时只认领服务端已有的同名文件，
     /// 服务端没有可匹配条目则返回 nil（不凭空新建空文件）。
     public func createFile(
@@ -206,7 +206,7 @@ extension SyncEngine {
         return try store(file, parentID: parentID, uri: uri)
     }
 
-    /// 上传因同名被拒：仅当允许已存在、服务端是文件且内容与本地逐字节相同时认领服务端条目，否则报冲突。
+    /// 上传因同名被拒：仅当允许已存在、服务端是文件且内容与本地相同时认领服务端条目，否则报冲突。
     private func adoptExistingFile(
         at uri: CloudreveURI, parentID: String, contents: URL?, mayAlreadyExist: Bool
     ) async throws -> SyncItem {
@@ -218,12 +218,16 @@ extension SyncEngine {
         return existing
     }
 
-    /// 服务端当前内容是否与本地文件逐字节相同（流式比较，遇到差异即停止）。
+    /// 服务端当前内容是否与本地文件相同：服务端公布了 SHA-256 时只比对摘要；否则下载服务端内容逐字节比较（遇到差异即停止）。
     private func remoteContent(of item: SyncItem, equals local: URL) async throws -> Bool {
         let size = try Self.fileSize(of: local)
         guard size == item.size else { return false }
         guard size > 0 else { return true }
-        let url = try await client.downloadURL(uri: item.uri, entity: Self.nonEmpty(item.entityID))
+        let entity = Self.nonEmpty(item.entityID)
+        if let digest = try await publishedEntity(fileID: item.id, entity: entity)?.sha256 {
+            return try ContentDigest.sha256(of: local) == digest
+        }
+        let url = try await client.downloadURL(uri: item.uri, entity: entity)
         let (head, chunks) = try await client.fetch(url: url)
         guard (200..<300).contains(head.status) else {
             throw CloudreveAPIError.http(status: head.status, body: try await CloudreveClient.collect(chunks))

@@ -76,8 +76,9 @@ extension CloudreveClient {
         try await request("GET", "/file/info", query: [("uri", uri.description)])
     }
 
-    public func fileInfo(id: String) async throws -> FileResponse {
-        try await request("GET", "/file/info", query: [("id", id)])
+    /// `extended` 为 true 时附带扩展信息（含全部实体），服务端需多查实体、存储策略与分享，只在需要时请求。
+    public func fileInfo(id: String, extended: Bool = false) async throws -> FileResponse {
+        try await request("GET", "/file/info", query: extended ? [("id", id), ("extended", "true")] : [("id", id)])
     }
 
     /// 目录自身信息。服务端拒绝对文件系统根（如 `cloudreve://my`）调用 `/file/info`（业务码 403），

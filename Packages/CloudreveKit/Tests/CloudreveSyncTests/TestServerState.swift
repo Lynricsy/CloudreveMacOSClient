@@ -75,6 +75,10 @@ struct ServerState: Sendable {
     private(set) var trashed: [String: ServerNode] = [:]
     /// 全部历史版本内容（entity id → 字节），供下载指定版本。
     private(set) var entities: [String: Data] = [:]
+    /// entity id → 所属节点 id，供 `/file/info?extended=true` 列出节点的全部实体。
+    private(set) var entityOwners: [String: String] = [:]
+    /// 服务端已算出并公布的实体 SHA-256（模拟 OpenCloudreve；默认为空，即官方服务端或尚未算完）。
+    var publishedHashes: [String: String] = [:]
     var uploads: [String: PendingUpload] = [:]
     var overrides: [ResponseOverride] = []
     /// 服务端单页上限（模拟 `max_page_size`）；nil 表示只受请求的 `page_size` 限制。
@@ -140,7 +144,7 @@ struct ServerState: Sendable {
             createdAt: date, updatedAt: date
         )
         if !isFolder {
-            node.entityID = storeEntity(content)
+            node.entityID = storeEntity(content, owner: node.id)
             node.content = content
         }
         nodes[node.id] = node
@@ -150,7 +154,7 @@ struct ServerState: Sendable {
     /// 写入新版本内容，返回新 entity id。
     @discardableResult
     mutating func setContent(id: String, _ content: Data) -> String {
-        let entity = storeEntity(content)
+        let entity = storeEntity(content, owner: id)
         nodes[id]?.content = content
         nodes[id]?.entityID = entity
         let date = tick()
@@ -187,9 +191,10 @@ struct ServerState: Sendable {
         return overrides.remove(at: index).response
     }
 
-    private mutating func storeEntity(_ content: Data) -> String {
+    private mutating func storeEntity(_ content: Data, owner: String) -> String {
         let entity = nextID("E")
         entities[entity] = content
+        entityOwners[entity] = owner
         return entity
     }
 }
