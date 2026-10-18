@@ -8,7 +8,7 @@ extension SyncEngine {
         try await run {
             let name = Self.normalizedName(name)
             try self.checkNameAvailable(name, in: parentID, excluding: nil, allowSameName: mayAlreadyExist)
-            let uri = try self.folderURI(id: parentID).appending(name)
+            let uri = try await self.currentFolderURI(id: parentID).appending(name)
             let file: FileResponse
             do {
                 file = try await self.client.createItem(uri: uri, isFolder: true)
@@ -36,7 +36,7 @@ extension SyncEngine {
                 throw SyncError.excludedFromSync
             }
             try self.checkNameAvailable(name, in: parentID, excluding: nil, allowSameName: mayAlreadyExist)
-            let uri = try self.folderURI(id: parentID).appending(name)
+            let uri = try await self.currentFolderURI(id: parentID).appending(name)
             if contents == nil, mayAlreadyExist {
                 return try await self.claimExistingFile(at: uri, parentID: parentID)
             }

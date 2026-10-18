@@ -217,14 +217,21 @@ public final class SyncEngine: Sendable {
             return nil
         }
         guard let path = info.path else { throw CloudreveAPIError.decoding("/file/info 缺少 path") }
-        guard let uri = Self.mountURI(path), try isStrictlyInsideRoot(uri) else { return nil }
+        guard let uri = try Self.mountURI(path), try isStrictlyInsideRoot(uri) else { return nil }
         return (info, uri)
     }
 
-    /// 服务端返回的路径 → `my` 文件系统 URI。回收站（`cloudreve://trash/…`）等其他文件系统返回 nil，调用方按「已移出挂载根」处理，
-    /// 不得退回事件里的旧路径（那会把已删除的条目写回镜像）。
-    static func mountURI(_ path: String) -> CloudreveURI? {
-        CloudreveURI(string: path)
+    /// 服务端返回的路径 → `my` 文件系统 URI。合法但属于其他文件系统（如回收站 `cloudreve://trash/…`）时返回 nil，
+    /// 调用方按「已移出挂载根」处理，不得退回事件里的旧路径（那会把已删除的条目写回镜像）。
+    /// 路径本身损坏（不是 Cloudreve URI，或 `my` 路径段无法解码）时抛错：不能据此把仍存在的条目当作已删除。
+    static func mountURI(_ path: String) throws -> CloudreveURI? {
+        if let uri = CloudreveURI(string: path) { return uri }
+        let scheme = "cloudreve://"
+        if path.hasPrefix(scheme) {
+            let authority = path.dropFirst(scheme.count).prefix { $0 != "/" && $0 != "?" && $0 != "#" }
+            if !authority.isEmpty, authority != "my" { return nil }
+        }
+        throw CloudreveAPIError.decoding("/file/info 路径无效：\(path)")
     }
 
     /// 服务端报告条目不存在（404 / 40044）。

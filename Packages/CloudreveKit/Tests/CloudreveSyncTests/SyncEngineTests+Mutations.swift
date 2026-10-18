@@ -132,6 +132,34 @@ extension SyncEngineTests {
         #expect(env.server.node("/real.txt")?.content == Data("data".utf8))
     }
 
+    /// 父目录远端已改名且原路径被另一个目录占用：新建目录、上传新文件、无内容认领都必须按父目录 id 解析当前路径。
+    @Test func createTargetsParentFolderByID() async throws {
+        let env = try await EngineHarness.make()
+        env.server.addFolder("/docs", id: "docs")
+        try await env.enumerateAll(env.rootID)
+        env.server.relocate("/docs", to: "/docs2")
+        env.server.addFolder("/docs", id: "impostor")
+        let existing = env.server.addFile("/docs2/real.txt", content: Data("data".utf8))
+
+        let folder = try await env.engine.createFolder(name: "sub", parentID: "docs", mayAlreadyExist: false)
+        #expect(folder.uri == .my("/docs2/sub"))
+        #expect(env.server.node(id: folder.id)?.segments == ["docs2", "sub"])
+
+        let file = try #require(try await env.engine.createFile(
+            name: "new.txt", parentID: "docs", contents: try EngineHarness.tempFile(Data("x".utf8)), mtime: Date(),
+            mayAlreadyExist: false, progress: ignoreProgress
+        ))
+        #expect(file.uri == .my("/docs2/new.txt"))
+        #expect(file.parentID == "docs")
+
+        let claimed = try await env.engine.createFile(
+            name: "real.txt", parentID: "docs", contents: nil, mtime: Date(), mayAlreadyExist: true, progress: ignoreProgress
+        )
+        #expect(claimed?.id == existing)
+        #expect(env.server.childNames("/docs").isEmpty)
+        #expect(try env.record("docs")?.uri == .my("/docs2"))
+    }
+
     // MARK: - 名称冲突与规范化
 
     /// 本地镜像中已有大小写不同或 Unicode 规范等价的同名条目：新建、重命名、移动都报冲突并带上该条目。

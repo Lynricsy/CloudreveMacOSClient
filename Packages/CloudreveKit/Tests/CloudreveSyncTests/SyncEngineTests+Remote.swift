@@ -50,6 +50,25 @@ extension SyncEngineTests {
         #expect(try env.record("f") == nil)
     }
 
+    /// `my` 路径本身损坏（无法解码）不同于移入回收站：必须报错，不得把仍存在的条目当作已删除清出镜像。
+    @Test func malformedMyPathFailsWithoutRemovingMirror() async throws {
+        let env = try await EngineHarness.make()
+        env.server.addFile("/a.txt", id: "f")
+        try await env.enumerateAll(env.rootID)
+        var broken = try #require(env.server.node(id: "f")).response
+        broken.path = "cloudreve://my/%ZZ"
+        for _ in 0..<2 { env.server.overrideNext("GET", "/api/v4/file/info", with: try .envelope(encoding: broken)) }
+
+        await #expect(throws: (any Error).self) {
+            _ = try await env.engine.applyRemoteEvents([FileEvent(type: .modify, fileID: "f", from: "/a.txt")])
+        }
+        await #expect(throws: (any Error).self) {
+            try await env.engine.delete(id: "f", recursive: true, baseContentVersion: nil)
+        }
+        #expect(try env.record("f")?.uri == .my("/a.txt"))
+        #expect(env.server.node(id: "f") != nil)
+    }
+
     @Test func remoteModifyUpdatesEntity() async throws {
         let env = try await EngineHarness.make()
         env.server.addFile("/m.txt", id: "m")

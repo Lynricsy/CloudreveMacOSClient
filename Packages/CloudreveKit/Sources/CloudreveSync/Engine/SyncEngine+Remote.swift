@@ -147,7 +147,7 @@ extension SyncEngine {
         // 只有服务端完全没给 path 时才用事件路径兜底；给了但不是 `my`（如已移入回收站）即视为移出挂载根
         let uri: CloudreveURI?
         if let path = info.path {
-            uri = Self.mountURI(path)
+            uri = try Self.mountURI(path)
         } else {
             uri = CloudreveURI.join(root: try drive().remoteRootURI, relative: event.to ?? event.from)
         }
