@@ -132,32 +132,49 @@ extension SyncEngineTests {
         #expect(env.server.node("/real.txt")?.content == Data("data".utf8))
     }
 
-    /// 父目录远端已改名且原路径被另一个目录占用：新建目录、上传新文件、无内容认领都必须按父目录 id 解析当前路径。
-    @Test func createTargetsParentFolderByID() async throws {
+    // MARK: - 父目录按 id 定位
+
+    /// 父目录 docs 已被镜像记录在 /docs，随后远端改名为 /docs2，原路径被另一个目录 impostor 占用。
+    /// 每个用例只执行一种新建操作：任何一次按 id 刷新都会顺带更新 docs 的镜像路径，掩盖后续操作的回归。
+    private func relocatedParentEnvironment() async throws -> EngineHarness {
         let env = try await EngineHarness.make()
         env.server.addFolder("/docs", id: "docs")
         try await env.enumerateAll(env.rootID)
         env.server.relocate("/docs", to: "/docs2")
         env.server.addFolder("/docs", id: "impostor")
-        let existing = env.server.addFile("/docs2/real.txt", content: Data("data".utf8))
+        #expect(try env.record("docs")?.uri == .my("/docs"))
+        return env
+    }
 
+    @Test func createFolderTargetsParentByID() async throws {
+        let env = try await relocatedParentEnvironment()
         let folder = try await env.engine.createFolder(name: "sub", parentID: "docs", mayAlreadyExist: false)
         #expect(folder.uri == .my("/docs2/sub"))
         #expect(env.server.node(id: folder.id)?.segments == ["docs2", "sub"])
+        #expect(env.server.childNames("/docs").isEmpty)
+    }
 
+    @Test func uploadNewFileTargetsParentByID() async throws {
+        let env = try await relocatedParentEnvironment()
         let file = try #require(try await env.engine.createFile(
             name: "new.txt", parentID: "docs", contents: try EngineHarness.tempFile(Data("x".utf8)), mtime: Date(),
             mayAlreadyExist: false, progress: ignoreProgress
         ))
         #expect(file.uri == .my("/docs2/new.txt"))
         #expect(file.parentID == "docs")
+        #expect(env.server.node(id: file.id)?.segments == ["docs2", "new.txt"])
+        #expect(env.server.childNames("/docs").isEmpty)
+    }
 
+    @Test func claimExistingFileTargetsParentByID() async throws {
+        let env = try await relocatedParentEnvironment()
+        let existing = env.server.addFile("/docs2/real.txt", content: Data("data".utf8))
+        env.server.addFile("/docs/real.txt", id: "decoy")
         let claimed = try await env.engine.createFile(
             name: "real.txt", parentID: "docs", contents: nil, mtime: Date(), mayAlreadyExist: true, progress: ignoreProgress
         )
         #expect(claimed?.id == existing)
-        #expect(env.server.childNames("/docs").isEmpty)
-        #expect(try env.record("docs")?.uri == .my("/docs2"))
+        #expect(claimed?.uri == .my("/docs2/real.txt"))
     }
 
     // MARK: - 名称冲突与规范化
