@@ -12,6 +12,8 @@ struct DrivesSettingsView: View {
                     "还没有云盘", systemImage: "externaldrive.badge.plus",
                     description: Text("添加一个 Cloudreve 云盘，即可在 Finder 中访问和同步文件。")
                 )
+                // 与概览分支的 ScrollView 一样占满高度，底部按钮栏才会贴底
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if driveManager.drives.count == 1, let drive = driveManager.drives.first {
                 ScrollView {
                     DriveDashboardView(drive: drive)
