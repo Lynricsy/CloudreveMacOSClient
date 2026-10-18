@@ -139,4 +139,30 @@ extension SyncEngineTests {
         }
         #expect(env.server.node("/name.txt")?.content == Self.original)
     }
+
+    /// 镜像路径已过期（远端改名后原路径被另一个文件占用）：内容覆盖必须写到该 id 的当前位置，而不是覆盖占位者。
+    @Test func modifyContentsTargetsCurrentServerLocationByID() async throws {
+        let (env, entity) = try await Self.modifyFixture()
+        env.server.relocate("/name.txt", to: "/renamed.txt")
+        env.server.addFile("/name.txt", content: Data("other".utf8), id: "other")
+
+        let result = try await Self.modify(env, fields: [.contents], content: Data("mine".utf8), base: entity)
+        #expect(env.server.node(id: "a")?.content == Data("mine".utf8))
+        #expect(env.server.node(id: "other")?.content == Data("other".utf8))
+        #expect(result.item.uri == .my("/renamed.txt"))
+        #expect(try env.record("a")?.uri == .my("/renamed.txt"))
+    }
+
+    /// 目标目录远端已换路径且原路径被另一个目录占用：移动必须按目标 id 解析当前路径。
+    @Test func moveTargetsDestinationFolderByID() async throws {
+        let (env, entity) = try await Self.modifyFixture()
+        env.server.relocate("/dst", to: "/dst2")
+        env.server.addFolder("/dst", id: "impostor")
+
+        let result = try await Self.modify(env, fields: [.parent], newParentID: "dst", base: entity)
+        #expect(env.server.node(id: "a")?.segments == ["dst2", "name.txt"])
+        #expect(env.server.childNames("/dst").isEmpty)
+        #expect(result.item.uri == .my("/dst2/name.txt"))
+        #expect(result.item.parentID == "dst")
+    }
 }

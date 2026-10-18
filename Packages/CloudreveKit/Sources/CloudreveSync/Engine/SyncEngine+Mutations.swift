@@ -132,7 +132,7 @@ extension SyncEngine {
         }
         // 冲突检查用服务端当前名称：镜像中的名称可能已过期
         try checkNameAvailable(location.file.name, in: toParentID, excluding: id)
-        let destination = try folderURI(id: toParentID)
+        let destination = try await currentFolderURI(id: toParentID)
         do {
             try await client.move(uris: [location.uri], to: destination)
         } catch let error as CloudreveAPIError where error.serverCode == 40004 {
@@ -144,7 +144,7 @@ extension SyncEngine {
     }
 
     /// 条目在服务端的当前状态与位置。
-    private struct RemoteLocation {
+    struct RemoteLocation {
         let file: FileResponse
         let uri: CloudreveURI
         let parentURI: CloudreveURI
@@ -153,13 +153,22 @@ extension SyncEngine {
 
     /// 按 id 解析条目在服务端的当前位置（父目录不在镜像中时逐级补查）。已不存在或已移出挂载根时删除本地记录并抛
     /// `.noSuchItem`。
-    private func currentLocation(of record: ItemRecord) async throws -> RemoteLocation {
+    func currentLocation(of record: ItemRecord) async throws -> RemoteLocation {
         guard let remote = try await remoteItem(id: record.id), let parentURI = remote.uri.parent,
               let parentID = try await resolveFolderID(forURI: parentURI) else {
             try removeLocally([record])
             throw SyncError.noSuchItem
         }
         return RemoteLocation(file: remote.file, uri: remote.uri, parentURI: parentURI, parentID: parentID)
+    }
+
+    /// 目录 id → 服务端当前路径（根为挂载根）。镜像中的路径可能已过期（远端改名或移动后原路径被占用），按 id 查询并刷新镜像；
+    /// 已不存在、已移出挂载根或不是目录时抛 `.noSuchItem`。
+    func currentFolderURI(id: String) async throws -> CloudreveURI {
+        if id == rootID { return try drive().remoteRootURI }
+        guard let remote = try await remoteItem(id: id), remote.file.isFolder else { throw SyncError.noSuchItem }
+        _ = try await storeRemote(remote)
+        return remote.uri
     }
 
     /// 把按 id 查到的服务端条目写入镜像（父目录不在镜像中时逐级补查）；父目录无法定位时返回 nil。
