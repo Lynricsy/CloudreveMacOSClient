@@ -25,6 +25,22 @@ extension SyncEngineTests {
         #expect(try Data(contentsOf: destination) == Data("hello world".utf8))
     }
 
+    /// 实体信息查询很慢、正文很快：必须等拿到期望摘要后才开始下载正文。
+    /// 传输层的分块流不限缓冲，提前开始会让正文在查询期间全部堆在内存里。
+    @Test func downloadStartsBodyOnlyAfterEntityInfoArrives() async throws {
+        let env = try await EngineHarness.make()
+        env.server.addFile("/f.bin", content: Data("hello world".utf8), id: "f")
+        try await env.enumerateAll(env.rootID)
+        env.server.publishHash(entity: try #require(try env.record("f")).entityID)
+        env.server.setLatency("GET /api/v4/file/info", .milliseconds(300))
+
+        let destination = EngineHarness.tempURL()
+        _ = try await env.engine.download(id: "f", version: nil, to: destination, progress: ignoreProgress)
+        #expect(try Data(contentsOf: destination) == Data("hello world".utf8))
+        let order = env.server.completedEndpoints().filter { $0.contains("file/info") || $0.contains("file/url") || $0.contains("/dl/") }
+        #expect(order == ["POST /api/v4/file/url", "GET /api/v4/file/info", "GET \(ServerState.downloadPrefix)"])
+    }
+
     /// 历史版本：镜像只知道当前版本的大小，按服务端记录的该实体大小与 SHA-256 校验。
     @Test func downloadOldVersionVerifiedByServerEntityInfo() async throws {
         let env = try await EngineHarness.make()

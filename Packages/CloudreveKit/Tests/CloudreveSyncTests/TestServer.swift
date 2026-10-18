@@ -16,6 +16,8 @@ final class TestServer: Sendable {
     private let state: Mutex<ServerState>
     /// 「方法 路径」→ 响应前的延迟（模拟慢请求，用于并发测试）。
     private let latencies = Mutex<[String: Duration]>([:])
+    /// 已应答请求的「方法 路径」（路由注册时的写法），按应答完成的先后排列。
+    private let completions = Mutex<[String]>([])
 
     private init(rootID: String) {
         state = Mutex(ServerState(rootID: rootID))
@@ -49,7 +51,9 @@ final class TestServer: Sendable {
             let parts = endpoint.split(separator: " ", maxSplits: 1).map(String.init)
             await mock.route(parts[0], parts[1]) { [self] request in
                 if let delay = latencies.withLock({ $0[endpoint] }) { try await Task.sleep(for: delay) }
-                return respond(request, handler)
+                let response = respond(request, handler)
+                completions.withLock { $0.append(endpoint) }
+                return response
             }
         }
     }
@@ -72,6 +76,11 @@ final class TestServer: Sendable {
         let refresh = CloudreveDate.format(Date().addingTimeInterval(86400))
         let json = #"{"access_token":"renewed","refresh_token":"r2","access_expires":"\#(access)","refresh_expires":"\#(refresh)"}"#
         return .envelope(dataJSON: json)
+    }
+
+    /// 已应答的端点，按完成先后排列（用于断言请求之间的先后依赖）。
+    func completedEndpoints() -> [String] {
+        completions.withLock { $0 }
     }
 
     // MARK: - 测试操作（模拟网页端改动）

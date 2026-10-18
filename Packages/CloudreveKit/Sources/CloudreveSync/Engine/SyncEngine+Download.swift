@@ -129,14 +129,15 @@ extension SyncEngine {
             throw SyncError.cannotSynchronize("无法创建临时文件")
         }
         if record.size == 0 && entity == nil { return 0 }
-        // 与取下载地址并发，不增加串行往返
+        // 实体信息与取下载地址并发，不增加串行往返；但必须在开始取正文前拿到：
+        // 传输层的分块流不限缓冲，正文先到而摘要迟迟未到时，整个文件会堆在扩展内存里
         async let published = publishedEntity(fileID: record.id, entity: entity)
         let url = try await client.downloadURL(uri: record.uri, entity: entity)
+        let known = try await published
         let (head, chunks) = try await client.fetch(url: url)
         guard (200..<300).contains(head.status) else {
             throw CloudreveAPIError.http(status: head.status, body: try await CloudreveClient.collect(chunks))
         }
-        let known = try await published
         let digest = known?.sha256
         var hasher = SHA256()
         let handle = try FileHandle(forWritingTo: destination)
