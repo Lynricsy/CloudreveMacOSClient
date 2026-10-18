@@ -1,7 +1,7 @@
 name: Release
 
-# 推送 vX.Y.Z tag 时发布：先跑完整 CI，再构建 arm64 Release 包并创建 GitHub Release。
-# 没有 Developer ID 签名，附件只是未签名的构建产物，供检查编译结果；使用者需自行用 Xcode 签名构建。
+# 推送 vX.Y.Z tag 时发布：先跑完整 CI，再编译 arm64 Release 配置，最后创建只含说明的 GitHub Release
+# （源码归档由 GitHub 自动附带）。没有 Developer ID 签名，未签名构建只作为 Actions artifact 保留供检查，不挂到 Release。
 on:
   push:
     tags: ['v*']
@@ -71,9 +71,14 @@ jobs:
           shasum -a 256 "$asset" >"$asset.sha256"
           echo "ASSET=$asset" >>"$GITHUB_ENV"
 
+      - name: 保留未签名构建（仅 Actions artifact）
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ env.ASSET }}
+          path: |
+            ${{ env.ASSET }}
+            ${{ env.ASSET }}.sha256
+          if-no-files-found: error
+
       - name: 创建 Release
-        run: |
-          # 先建草稿、传完附件再公开，避免公开后附件缺失
-          gh release create "$TAG" --draft --verify-tag --title "Cloudreve $TAG" --notes-file notes.md \
-            "$ASSET" "$ASSET.sha256"
-          gh release edit "$TAG" --draft=false
+        run: gh release create "$TAG" --verify-tag --title "Cloudreve $TAG" --notes-file notes.md

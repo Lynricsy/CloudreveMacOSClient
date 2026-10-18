@@ -63,8 +63,8 @@ Bundle ID：App `plus.ling.cloudreve`，扩展 `plus.ling.cloudreve.fileprovider
 ### CI 与发布
 
 - `.github/workflows/ci.yml`：推送到 `main` 和 PR 时在 GitHub `xcode-27` runner（Apple Silicon）上运行 SwiftLint、CloudreveKit 单元测试和 arm64 无签名构建。
-- `.github/workflows/release.yml`：推送 `vX.Y.Z` tag 时先跑完整 CI，再构建 arm64 Release 包并发布 GitHub Release；tag 必须与 `Config/Base.xcconfig` 的 `MARKETING_VERSION` 一致，说明取自 `CHANGELOG.md` 对应版本一节。
-- 项目没有 Developer ID 签名，Release 附件是未签名产物，不能直接使用；使用者需按上面的步骤用自己的团队构建。不构建 x86_64。
+- `.github/workflows/release.yml`：推送 `vX.Y.Z` tag 时先跑完整 CI，再编译 arm64 Release 配置并发布 GitHub Release；tag 必须与 `Config/Base.xcconfig` 的 `MARKETING_VERSION` 一致，说明取自 `CHANGELOG.md` 对应版本一节。
+- 项目没有 Developer ID 签名，Release 只含说明和 GitHub 自动生成的源码归档；未签名的 arm64 构建只作为该次运行的 Actions artifact 保留，供核对编译结果，不能直接使用。使用者需按上面的步骤用自己的团队构建。不构建 x86_64。
 
 ## 首次运行
 

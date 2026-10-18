@@ -8,7 +8,7 @@
 
 ### 安装方式
 
-本版本**不提供可直接使用的 App**：项目没有 Developer ID 签名，附件 `Cloudreve-0.1.0-arm64-unsigned.zip` 是 CI 编译出的未签名产物，不带 App Group、钥匙串共享等签名授权，无法正常运行，仅用于核对构建结果。
+本版本**只发布源码，不提供 App 安装包**：项目没有 Developer ID 签名，而 File Provider 扩展与钥匙串共享都依赖开发团队签名，未签名的构建无法正常运行。
 
 请用自己的 Apple 账号从源码构建，需要 macOS 26、Xcode 27、Apple Silicon：
 
