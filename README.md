@@ -60,6 +60,12 @@ open Cloudreve.xcodeproj
 
 Bundle ID：App `plus.ling.cloudreve`，扩展 `plus.ling.cloudreve.fileprovider`，App Group `$(TeamIdentifierPrefix)plus.ling.cloudreve`（macOS 上 Team 前缀形式无需描述文件授权，个人团队可用），钥匙串访问组 `$(AppIdentifierPrefix)plus.ling.cloudreve.shared`，URL scheme `cloudreve`。
 
+### CI 与发布
+
+- `.github/workflows/ci.yml`：推送到 `main` 和 PR 时在 GitHub `xcode-27` runner（Apple Silicon）上运行 SwiftLint、CloudreveKit 单元测试和 arm64 无签名构建。
+- `.github/workflows/release.yml`：推送 `vX.Y.Z` tag 时先跑完整 CI，再构建 arm64 Release 包并发布 GitHub Release；tag 必须与 `Config/Base.xcconfig` 的 `MARKETING_VERSION` 一致，说明取自 `CHANGELOG.md` 对应版本一节。
+- 项目没有 Developer ID 签名，Release 附件是未签名产物，不能直接使用；使用者需按上面的步骤用自己的团队构建。不构建 x86_64。
+
 ## 首次运行
 
 1. 启动后菜单栏出现云朵图标（无 Dock 图标），点击弹出窗口。
@@ -95,6 +101,7 @@ log stream --info | grep -i fileprovider                        # 系统 File Pr
 - 不同步回收站；删除走服务端软删除，可在网页端回收站恢复。
 - 不支持大文件部分读取（`NSFileProviderPartialContentFetching`）。
 - `MenuBarExtra` 无法区分左右键，Windows 版托盘右键菜单的功能并入弹窗右上角齿轮菜单。
+- 上游 Cloudreve 撤销 OAuth 授权后再重新授权，新令牌约一小时后无法刷新（服务端缺陷，[OpenCloudreve#1](https://github.com/Lynricsy/OpenCloudreve/issues/1)，OpenCloudreve 4.19.7 已修复）。
 
 ## 许可
 
