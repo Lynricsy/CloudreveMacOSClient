@@ -207,7 +207,8 @@ public final class SyncEngine: Sendable {
         return uri
     }
 
-    /// 按 id 查询服务端当前条目与路径（镜像中的路径可能已过期）；已不存在或已不在挂载根之内（含根本身）时返回 nil。
+    /// 按 id 查询服务端当前条目与路径（镜像中的路径可能已过期）；已不存在或已不在挂载根之内（含根本身、回收站等非 `my`
+    /// 文件系统）时返回 nil。
     func remoteItem(id: String) async throws -> (file: FileResponse, uri: CloudreveURI)? {
         let info: FileResponse
         do {
@@ -215,11 +216,15 @@ public final class SyncEngine: Sendable {
         } catch where Self.isNotFound(error) {
             return nil
         }
-        guard let path = info.path, let uri = CloudreveURI(string: path) else {
-            throw CloudreveAPIError.decoding("/file/info 缺少有效 path")
-        }
-        guard try isStrictlyInsideRoot(uri) else { return nil }
+        guard let path = info.path else { throw CloudreveAPIError.decoding("/file/info 缺少 path") }
+        guard let uri = Self.mountURI(path), try isStrictlyInsideRoot(uri) else { return nil }
         return (info, uri)
+    }
+
+    /// 服务端返回的路径 → `my` 文件系统 URI。回收站（`cloudreve://trash/…`）等其他文件系统返回 nil，调用方按「已移出挂载根」处理，
+    /// 不得退回事件里的旧路径（那会把已删除的条目写回镜像）。
+    static func mountURI(_ path: String) -> CloudreveURI? {
+        CloudreveURI(string: path)
     }
 
     /// 服务端报告条目不存在（404 / 40044）。

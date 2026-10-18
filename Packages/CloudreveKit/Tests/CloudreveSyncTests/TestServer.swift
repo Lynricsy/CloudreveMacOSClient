@@ -104,6 +104,14 @@ final class TestServer: Sendable {
         }
     }
 
+    /// 把文件移入回收站：按 id 查询返回回收站路径，原路径不再存在。
+    func trash(_ path: String) {
+        state.withLock { state in
+            guard let node = state.node(at: CloudreveURI.my(path).segments) else { preconditionFailure("不存在：\(path)") }
+            state.trash(id: node.id)
+        }
+    }
+
     func node(_ path: String) -> ServerNode? {
         state.withLock { $0.node(at: CloudreveURI.my(path).segments) }
     }

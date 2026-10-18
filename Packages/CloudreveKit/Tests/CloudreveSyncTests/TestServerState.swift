@@ -71,6 +71,8 @@ struct ServerState: Sendable {
     static let epoch = Date(timeIntervalSince1970: 1_700_000_000)
 
     private(set) var nodes: [String: ServerNode] = [:]
+    /// 已移入回收站的节点（按 id 仍可查询，按路径与列目录不可见）。
+    private(set) var trashed: [String: ServerNode] = [:]
     /// 全部历史版本内容（entity id → 字节），供下载指定版本。
     private(set) var entities: [String: Data] = [:]
     var uploads: [String: PendingUpload] = [:]
@@ -171,6 +173,12 @@ struct ServerState: Sendable {
     mutating func removeTree(id: String) {
         guard let root = nodes[id]?.segments else { return }
         nodes = nodes.filter { !Self.hasPrefix($0.value.segments, root) }
+    }
+
+    /// 把单个节点移入回收站。
+    mutating func trash(id: String) {
+        guard let node = nodes.removeValue(forKey: id) else { return }
+        trashed[id] = node
     }
 
     /// 取出第一个匹配请求的一次性覆盖。

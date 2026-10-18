@@ -144,11 +144,15 @@ extension SyncEngine {
             try removeLocally(existing.map { [$0] } ?? [])
             return
         }
-        let root = try drive().remoteRootURI
-        let uri = info.path.flatMap(CloudreveURI.init(string:))
-            ?? CloudreveURI.join(root: root, relative: event.to ?? event.from)
+        // 只有服务端完全没给 path 时才用事件路径兜底；给了但不是 `my`（如已移入回收站）即视为移出挂载根
+        let uri: CloudreveURI?
+        if let path = info.path {
+            uri = Self.mountURI(path)
+        } else {
+            uri = CloudreveURI.join(root: try drive().remoteRootURI, relative: event.to ?? event.from)
+        }
         // 移出挂载根，或移入尚未枚举的目录：删除本地旧位置，待该目录被枚举时再出现
-        guard try isStrictlyInsideRoot(uri), let parentURI = uri.parent,
+        guard let uri, try isStrictlyInsideRoot(uri), let parentURI = uri.parent,
               let parentID = try parentID(forURI: parentURI) else {
             try removeLocally(existing.map { [$0] } ?? [])
             return

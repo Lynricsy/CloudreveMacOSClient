@@ -26,6 +26,30 @@ extension SyncEngineTests {
         #expect(try env.latestSeq() == 0)
     }
 
+    /// 移入回收站的文件按 id 仍能查到，但 path 是 `cloudreve://trash/…`：补发的改名事件不得按事件路径把它写回挂载根。
+    @Test func remoteEventForTrashedFileRemovesInsteadOfResurrecting() async throws {
+        let env = try await EngineHarness.make()
+        env.server.addFile("/a.txt", id: "f")
+        try await env.enumerateAll(env.rootID)
+        env.server.relocate("/a.txt", to: "/b.txt")
+        env.server.trash("/b.txt")
+
+        _ = try await env.engine.applyRemoteEvents([FileEvent(type: .rename, fileID: "f", from: "/a.txt", to: "/b.txt")])
+        #expect(try env.record("f") == nil)
+        #expect(try env.logged().last == LoggedChange(id: "f", kind: .delete))
+    }
+
+    /// 本地删除一个服务端已移入回收站的文件：视为已删除，而不是因回收站路径无法解析而报错。
+    @Test func deletingTrashedFileSucceeds() async throws {
+        let env = try await EngineHarness.make()
+        env.server.addFile("/a.txt", id: "f")
+        try await env.enumerateAll(env.rootID)
+        env.server.trash("/a.txt")
+
+        try await env.engine.delete(id: "f", recursive: true, baseContentVersion: nil)
+        #expect(try env.record("f") == nil)
+    }
+
     @Test func remoteModifyUpdatesEntity() async throws {
         let env = try await EngineHarness.make()
         env.server.addFile("/m.txt", id: "m")

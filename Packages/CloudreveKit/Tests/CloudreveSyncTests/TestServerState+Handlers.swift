@@ -61,6 +61,12 @@ extension ServerState {
     func info(_ request: HTTPRequest) throws -> HTTPResponse {
         let query = request.queryItems
         if let id = query["id"] {
+            if let node = trashed[id] {
+                // 与真实服务端一致：回收站中的条目按 id 仍可查到，path 是回收站路径
+                var response = node.response
+                response.path = "cloudreve://trash/\(UUID().uuidString.lowercased())"
+                return try .envelope(encoding: response)
+            }
             guard let node = node(id: id) else { throw ServerFailure(code: 40044) }
             return try .envelope(encoding: node.response)
         }
